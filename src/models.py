@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -169,7 +169,7 @@ class AnalysisResult(BaseModel):
     """Complete structured analysis produced by Phase 1."""
 
     book_id: str
-    analysis_date: datetime = Field(default_factory=datetime.utcnow)
+    analysis_date: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Section 1 + 10
     identification: dict[str, Any] = Field(default_factory=dict)
@@ -235,7 +235,7 @@ class ChapterCacheEntry(BaseModel):
     filename: str
     text_nodes: list[dict[str, Any]]
     """Serialised TextNode list (original + translated)."""
-    completed_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class CacheState(BaseModel):
@@ -243,4 +243,4 @@ class CacheState(BaseModel):
     analysis_complete: bool = False
     completed_chapters: list[int] = Field(default_factory=list)
     """Sorted list of completed chapter numbers (0-based)."""
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
