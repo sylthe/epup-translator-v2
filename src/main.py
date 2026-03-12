@@ -69,6 +69,28 @@ def translate(
     )
 
 
+@cli.command("clear-cache")
+@click.argument("epub_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--config", "config_path", type=click.Path(path_type=Path), default="config.yaml", show_default=True, help="Config YAML file.")
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt.")
+def clear_cache(epub_path: Path, config_path: Path, yes: bool) -> None:
+    """Supprime le cache (analyse + chapitres) pour un ePub donné."""
+    config = load_config(config_path)
+    epub_content = extract_epub(epub_path)
+    cache = CacheManager(
+        epub_content.book_id,
+        config.output.cache_dir,
+        analysis_dir=config.output.analysis_dir,
+    )
+    console.print(f"  Livre  : [cyan]{epub_content.metadata.get('title', epub_path.name)}[/cyan]")
+    console.print(f"  book_id: [dim]{epub_content.book_id}[/dim]")
+    if not yes and not click.confirm("Supprimer le cache pour ce livre ?"):
+        console.print("Annulé.")
+        return
+    cache.reset()
+    console.print("[green]Cache supprimé.[/green]")
+
+
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
