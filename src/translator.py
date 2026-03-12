@@ -195,7 +195,12 @@ async def translate_chapter(
         len(segments),
     )
 
+    n_segments = len(segments)
     for seg_idx, segment in enumerate(segments):
+        if progress is not None and progress_task is not None and n_segments > 1:
+            chap_label = f"[cyan]Chapitre {chapter_num + 1}[/cyan] — segment {seg_idx + 1}/{n_segments}"
+            progress.update(progress_task, description=chap_label)
+
         result = await translate_segment(
             segment=segment,
             analysis=analysis,
@@ -211,9 +216,6 @@ async def translate_chapter(
         if result.translation_notes:
             for note in result.translation_notes:
                 logger.debug("Translation note [ch%d seg%d]: %s", chapter_num, seg_idx, note)
-
-        if progress is not None and progress_task is not None:
-            progress.advance(progress_task, advance=1 / len(segments))
 
     cache.save_chapter_result(chapter_num, chapter.text_nodes)
     return chapter
