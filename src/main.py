@@ -122,7 +122,7 @@ async def run_translation(
         sys.exit(1)
 
     analysis = await run_analysis(
-        epub_content, client, prompt_builder, cache, config
+        epub_content, client, prompt_builder, cache, config, console=console
     )
 
     display_analysis_summary(analysis, console)
