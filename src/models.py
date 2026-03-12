@@ -138,15 +138,15 @@ class RelationModel(BaseModel):
 
 
 class GlossaireTerme(BaseModel):
-    en: str
-    fr: str
+    en: str = ""
+    fr: str = ""
     contexte: str = ""
 
 
 class IdiomeModel(BaseModel):
     expression: str
     sens: str = ""
-    traduction: str
+    traduction: str = ""
 
 
 class ReferenceCulturelle(BaseModel):

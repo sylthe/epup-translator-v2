@@ -134,6 +134,22 @@ def _parse_section_response(section_name: str, text: str) -> dict[str, Any]:
     return {}
 
 
+def _as_list(value: Any) -> list[Any]:
+    """Ensure a value is a plain list; wrap dicts in a list, return [] for None."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        # API sometimes returns a nested dict instead of a list — flatten values
+        flat: list[Any] = []
+        for v in value.values():
+            if isinstance(v, list):
+                flat.extend(v)
+        return flat
+    return []
+
+
 def _merge_analysis(results: dict[str, dict[str, Any]], book_id: str) -> AnalysisResult:
     """Merge per-section dicts into a single AnalysisResult."""
 
@@ -143,24 +159,28 @@ def _merge_analysis(results: dict[str, dict[str, Any]], book_id: str) -> Analysi
                 return section_data[key]
         return default
 
-    return AnalysisResult(
-        book_id=book_id,
-        identification=_get("identification", {}),
-        structure_texte=_get("structure_texte", {}),
-        cadre_narratif=_get("cadre_narratif", {}),
-        ton_style=_get("ton_style", {}),
-        personnages=_get("personnages", []),
-        relations=_get("relations", []),
-        registre_dialogues=_get("registre_dialogues", {}),
-        glossaire=_get("glossaire", []),
-        idiomes=_get("idiomes", []),
-        contraintes_grammaticales=_get("contraintes_grammaticales", []),
-        references_culturelles=_get("references_culturelles", []),
-        themes=_get("themes", []),
-        sensibilite_contenu=_get("sensibilite_contenu", {}),
-        coherence_stylistique=_get("coherence_stylistique", {}),
-        notes_traduction=_get("notes_traduction", []),
-    )
+    try:
+        return AnalysisResult(
+            book_id=book_id,
+            identification=_get("identification", {}),
+            structure_texte=_get("structure_texte", {}),
+            cadre_narratif=_get("cadre_narratif", {}),
+            ton_style=_get("ton_style", {}),
+            personnages=_as_list(_get("personnages")),
+            relations=_as_list(_get("relations")),
+            registre_dialogues=_get("registre_dialogues", {}),
+            glossaire=_as_list(_get("glossaire")),
+            idiomes=_as_list(_get("idiomes")),
+            contraintes_grammaticales=_as_list(_get("contraintes_grammaticales")),
+            references_culturelles=_as_list(_get("references_culturelles")),
+            themes=_as_list(_get("themes")),
+            sensibilite_contenu=_get("sensibilite_contenu", {}),
+            coherence_stylistique=_get("coherence_stylistique", {}),
+            notes_traduction=_as_list(_get("notes_traduction")),
+        )
+    except Exception as exc:
+        logger.warning("AnalysisResult validation error — some fields may be empty: %s", exc)
+        return AnalysisResult(book_id=book_id)
 
 
 _SECTION_LABELS: dict[str, str] = {
