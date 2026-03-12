@@ -148,6 +148,27 @@ def test_merge_analysis_returns_analysis_result():
     assert analysis.cadre_narratif["point_de_vue"] == "1re personne"
 
 
+def test_merge_analysis_extracts_personnages_and_relations():
+    results = {
+        "personnages_et_relations": {
+            "personnages": [
+                {"nom": "Alice", "genre": "féminin", "role_narratif": "protagoniste"}
+            ],
+            "relations": [
+                {"personnages": ["Alice", "Bob"], "relation": "amicale", "registre": "tu"}
+            ],
+            "glossaire": [{"en": "grumpy", "fr": "grincheux", "contexte": "adjectif"}],
+        }
+    }
+    analysis = _merge_analysis(results, "book-xyz")
+    assert len(analysis.personnages) == 1
+    assert analysis.personnages[0].nom == "Alice"
+    assert len(analysis.relations) == 1
+    assert "Alice" in analysis.relations[0].personnages
+    assert len(analysis.glossaire) == 1
+    assert analysis.glossaire[0].en == "grumpy"
+
+
 @pytest.mark.asyncio
 async def test_run_analysis_calls_all_sections(
     epub_content, mock_client, prompt_builder, cache, config

@@ -30,60 +30,39 @@ def build_analysis_sample(
     """
     Build a representative text sample for analysis.
 
-    Strategy (from spec):
-    - Chapters 1–3 in full (establish tone, characters, style)
-    - One middle chapter
-    - Last chapter
-    - Total capped at ~50 000 tokens
+    Strategy: include ALL chapters in reading order up to the 50 000-token
+    budget, truncating the last included chapter if needed.  This maximises
+    character and plot coverage compared to a sparse selection.
     """
     max_tokens = 50_000
     chapters = [item for item in spine_items if item.is_chapter]
 
     if not chapters:
-        # Fallback: use all spine items
         chapters = spine_items
-
-    selected_indices: list[int] = []
-    nb = len(chapters)
-
-    # First 3 chapters (indices 0, 1, 2)
-    for i in config.analysis.sample_chapters:
-        idx = i - 1  # convert 1-based to 0-based
-        if 0 <= idx < nb:
-            selected_indices.append(idx)
-
-    # Middle chapter
-    if config.analysis.include_middle and nb > 4:
-        mid = nb // 2
-        if mid not in selected_indices:
-            selected_indices.append(mid)
-
-    # Last chapter
-    if config.analysis.include_last and nb > 1:
-        last = nb - 1
-        if last not in selected_indices:
-            selected_indices.append(last)
-
-    selected_indices = sorted(set(selected_indices))
 
     parts: list[str] = []
     total_tokens = 0
 
-    for idx in selected_indices:
-        chapter = chapters[idx]
+    for idx, chapter in enumerate(chapters):
         text = "\n".join(
             node.original_text
             for node in chapter.text_nodes
             if node.original_text.strip()
         )
+        if not text:
+            continue
+
         tokens = client.count_tokens(text)
-        if total_tokens + tokens > max_tokens and parts:
-            # Truncate this chapter to fit remaining budget
-            remaining = max_tokens - total_tokens
-            words = text.split()
-            # rough estimate: 1 token ≈ 0.75 words
-            word_limit = int(remaining * 0.75)
-            text = " ".join(words[:word_limit])
+        remaining = max_tokens - total_tokens
+
+        if tokens > remaining:
+            if not parts:
+                # First chapter alone exceeds budget — truncate it
+                words = text.split()
+                word_limit = int(remaining * 0.75)
+                text = " ".join(words[:word_limit])
+            else:
+                break  # budget exhausted
 
         header = f"\n\n--- CHAPTER {idx + 1} ---\n\n"
         parts.append(header + text)
@@ -170,14 +149,14 @@ def _merge_analysis(results: dict[str, dict[str, Any]], book_id: str) -> Analysi
         structure_texte=_get("structure_texte", {}),
         cadre_narratif=_get("cadre_narratif", {}),
         ton_style=_get("ton_style", {}),
-        personnages=[],  # will be populated below
-        relations=[],
+        personnages=_get("personnages", []),
+        relations=_get("relations", []),
         registre_dialogues=_get("registre_dialogues", {}),
-        glossaire=[],
-        idiomes=[],
+        glossaire=_get("glossaire", []),
+        idiomes=_get("idiomes", []),
         contraintes_grammaticales=_get("contraintes_grammaticales", []),
-        references_culturelles=[],
-        themes=[],
+        references_culturelles=_get("references_culturelles", []),
+        themes=_get("themes", []),
         sensibilite_contenu=_get("sensibilite_contenu", {}),
         coherence_stylistique=_get("coherence_stylistique", {}),
         notes_traduction=_get("notes_traduction", []),
