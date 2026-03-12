@@ -162,11 +162,11 @@ async def run_translation(
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task(
-            "Traduction des chapitres", total=len(chapters_to_translate)
-        )
+        task = progress.add_task("Traduction", total=len(chapters_to_translate))
 
-        for chapter in chapters_to_translate:
+        for i, chapter in enumerate(chapters_to_translate):
+            label = f"[cyan]Chapitre {(chapter.chapter_number or 0) + 1}[/cyan] ({chapter.filename})"
+            progress.update(task, description=label)
             await translate_chapter(
                 chapter=chapter,
                 analysis=analysis,
