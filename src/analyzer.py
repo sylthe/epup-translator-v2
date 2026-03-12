@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from rich.console import Console
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from src.cache_manager import CacheManager
@@ -143,6 +144,16 @@ def _merge_analysis(results: dict[str, dict[str, Any]], book_id: str) -> Analysi
     )
 
 
+_SECTION_LABELS: dict[str, str] = {
+    "identification_et_structure": "Identification & structure",
+    "cadre_narratif_et_style":     "Cadre narratif & style",
+    "personnages_et_relations":    "Personnages & relations",
+    "linguistique":                "Glossaire & idiomes",
+    "culture_themes_sensibilite":  "Culture, thèmes & sensibilité",
+    "coherence_et_notes":          "Cohérence & notes finales",
+}
+
+
 async def run_analysis(
     epub_content_or_sample: Any,
     client: ClaudeClient,
@@ -151,39 +162,58 @@ async def run_analysis(
     config: Config,
     *,
     sample_text: str | None = None,
+    console: Console | None = None,
 ) -> AnalysisResult:
     """
     Run the 6 sequential analysis API calls and return a merged AnalysisResult.
 
     If analysis is already cached, loads from cache instead.
+    Displays a Rich progress bar when *console* is provided.
     """
     if cache.is_analysis_complete():
         logger.info("Loading analysis from cache")
+        if console:
+            console.print("  [dim]Analyse trouvée en cache — chargement.[/dim]")
         return cache.load_analysis()
 
     # Build sample if not provided
     if sample_text is None:
-        from src.models import EpubContent
         if isinstance(epub_content_or_sample, str):
             sample_text = epub_content_or_sample
         else:
+            if console:
+                console.print("  Construction de l'échantillon…")
             sample_text = build_analysis_sample(
                 epub_content_or_sample.spine_items, config, client
             )
 
     results: dict[str, dict[str, Any]] = {}
 
-    for section in ANALYSIS_SECTIONS:
-        name = section["name"]
-        logger.info("Analysing section: %s", name)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+        transient=False,
+    ) as progress:
+        task = progress.add_task("Analyse", total=len(ANALYSIS_SECTIONS))
 
-        system, user = prompt_builder.build_analysis_prompt(name, sample_text)
-        response = await client.complete(system, user)
-        parsed = _parse_section_response(name, response)
-        results[name] = parsed
+        for section in ANALYSIS_SECTIONS:
+            name = section["name"]
+            label = _SECTION_LABELS.get(name, name)
+            progress.update(task, description=f"[cyan]{label}[/cyan]")
+            logger.info("Analysing section: %s", name)
 
-        if config.translation.batch_delay_seconds > 0:
-            await asyncio.sleep(config.translation.batch_delay_seconds)
+            system, user = prompt_builder.build_analysis_prompt(name, sample_text)
+            response = await client.complete(system, user)
+            parsed = _parse_section_response(name, response)
+            results[name] = parsed
+
+            progress.advance(task)
+
+            if config.translation.batch_delay_seconds > 0:
+                await asyncio.sleep(config.translation.batch_delay_seconds)
 
     book_id = (
         epub_content_or_sample.book_id
