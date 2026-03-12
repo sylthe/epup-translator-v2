@@ -26,11 +26,18 @@ A Python CLI application that translates English `.epub` novels to French using 
 pip install -e .
 ```
 
-Set your Anthropic API key:
+Copier le fichier d'exemple et renseigner la clé API Anthropic :
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+cp .env.example .env
+# puis éditer .env :
+# ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+> **Alternative** : exporter la variable directement dans le shell — elle prend la priorité sur `.env`.
+> ```bash
+> export ANTHROPIC_API_KEY="sk-ant-..."
+> ```
 
 ---
 
@@ -101,6 +108,7 @@ mypy src/
 epub-translator/
 ├── pyproject.toml
 ├── config.yaml
+├── .env.example         # modèle — copier en .env et renseigner ANTHROPIC_API_KEY
 ├── README.md
 ├── src/
 │   ├── main.py          # CLI entry point
