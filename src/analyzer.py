@@ -8,6 +8,8 @@ import logging
 import re
 from typing import Any
 
+from json_repair import repair_json
+
 from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -93,26 +95,64 @@ def build_analysis_sample(
     return "".join(parts)
 
 
+def _extract_json_candidate(text: str) -> str:
+    """
+    Extract the most likely JSON object from a raw LLM response.
+
+    Strategy (in order):
+    1. Content inside a ```json ... ``` or ``` ... ``` fence
+    2. Substring from the first '{' to the last '}'
+    3. The original text stripped of leading/trailing whitespace
+    """
+    stripped = text.strip()
+
+    # 1. Markdown fence
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped)
+    if fence:
+        return fence.group(1).strip()
+
+    # 2. First '{' … last '}'
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return stripped[start : end + 1]
+
+    return stripped
+
+
 def _parse_section_response(section_name: str, text: str) -> dict[str, Any]:
     """
-    Parse JSON from a Claude response, handling Markdown code fences.
+    Parse JSON from a Claude response using a cascade of strategies:
 
-    Returns the parsed dict, or an empty dict with an 'error' key on failure.
+    1. Standard json.loads on the extracted candidate
+    2. json_repair (handles trailing commas, single quotes, etc.)
+    3. Return an error dict (section will be empty, not fatal)
     """
-    # Strip markdown fences if present
-    cleaned = text.strip()
-    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned)
-    if fence_match:
-        cleaned = fence_match.group(1).strip()
+    candidate = _extract_json_candidate(text)
 
+    # Strategy 1: strict parse
     try:
-        data = json.loads(cleaned)
+        data = json.loads(candidate)
         if isinstance(data, dict):
             return data
-        return {"_raw": data}
-    except json.JSONDecodeError as exc:
-        logger.warning("Failed to parse JSON for section %r: %s", section_name, exc)
-        return {"error": str(exc), "_raw_text": text[:500]}
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: lenient repair
+    try:
+        repaired = repair_json(candidate, return_objects=True)
+        if isinstance(repaired, dict) and repaired:
+            logger.info("JSON repaired for section %r", section_name)
+            return repaired
+    except Exception:
+        pass
+
+    logger.warning(
+        "Could not parse JSON for section %r — section will be empty.\nRaw (first 300 chars): %s",
+        section_name,
+        text[:300],
+    )
+    return {}
 
 
 def _merge_analysis(results: dict[str, dict[str, Any]], book_id: str) -> AnalysisResult:
@@ -208,8 +248,14 @@ async def run_analysis(
             system, user = prompt_builder.build_analysis_prompt(name, sample_text)
             response = await client.complete(system, user)
             parsed = _parse_section_response(name, response)
-            results[name] = parsed
 
+            # Retry once if parsing returned empty (malformed JSON)
+            if not parsed:
+                progress.update(task, description=f"[yellow]{label} — nouvelle tentative…[/yellow]")
+                response = await client.complete(system, user)
+                parsed = _parse_section_response(name, response)
+
+            results[name] = parsed
             progress.advance(task)
 
             if config.translation.batch_delay_seconds > 0:

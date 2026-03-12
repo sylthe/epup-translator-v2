@@ -7,6 +7,8 @@ import logging
 import re
 from typing import Any
 
+from json_repair import repair_json
+
 from rich.progress import Progress, TaskID
 
 from src.cache_manager import CacheManager
@@ -84,26 +86,45 @@ def get_segment_context(
     return "Fin du segment précédent (pour la continuité) :\n" + "\n".join(lines)
 
 
+def _extract_json_candidate(text: str) -> str:
+    """Extract the most likely JSON object from a raw LLM response."""
+    stripped = text.strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped)
+    if fence:
+        return fence.group(1).strip()
+    start, end = stripped.find("{"), stripped.rfind("}")
+    if start != -1 and end > start:
+        return stripped[start : end + 1]
+    return stripped
+
+
 def _parse_translation_response(text: str) -> TranslationResult:
     """
-    Parse JSON from Claude's translation response.
-
-    Handles markdown code fences. Falls back gracefully if parsing fails.
+    Parse JSON from Claude's translation response using a cascade:
+    1. Standard json.loads
+    2. json_repair (handles trailing commas, single quotes, etc.)
+    3. Empty result (non-fatal — segment will have no translations)
     """
-    cleaned = text.strip()
-    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned)
-    if fence_match:
-        cleaned = fence_match.group(1).strip()
+    candidate = _extract_json_candidate(text)
 
+    # Strategy 1: strict
     try:
-        data = json.loads(cleaned)
+        data = json.loads(candidate)
         return TranslationResult(**data)
-    except Exception as exc:
-        logger.warning("Failed to parse translation response: %s", exc)
-        return TranslationResult(
-            translated_nodes=[],
-            translation_notes=[f"Parse error: {exc}"],
-        )
+    except Exception:
+        pass
+
+    # Strategy 2: repair
+    try:
+        repaired = repair_json(candidate, return_objects=True)
+        if isinstance(repaired, dict) and repaired:
+            logger.info("Translation JSON repaired")
+            return TranslationResult(**repaired)
+    except Exception:
+        pass
+
+    logger.warning("Could not parse translation response — segment skipped.\nRaw (first 300): %s", text[:300])
+    return TranslationResult(translated_nodes=[], translation_notes=["Parse error — segment skipped"])
 
 
 async def translate_segment(

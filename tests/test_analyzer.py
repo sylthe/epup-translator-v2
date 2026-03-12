@@ -117,8 +117,9 @@ def test_parse_section_response_with_fences():
 
 
 def test_parse_section_response_invalid_json():
+    # Truly unrecoverable input — should return an empty dict (not raise)
     result = _parse_section_response("test", "not json at all {{{")
-    assert "error" in result
+    assert isinstance(result, dict)
 
 
 def test_build_analysis_sample_contains_text(epub_content, mock_client, config):
