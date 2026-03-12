@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "release/**"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: pytest + ruff + mypy
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]" || pip install -e .
+          pip install pytest pytest-asyncio ruff mypy
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+      - name: Ruff lint
+        run: ruff check src/ || true  # non-blocking until codebase is fully typed
+
+      - name: mypy type check
+        run: mypy src/ || true  # non-blocking until codebase is fully typed

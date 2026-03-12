@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import re
+import warnings
 from pathlib import Path
 from typing import Any
 
 import ebooklib
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, NavigableString, Tag, XMLParsedAsHTMLWarning
 from ebooklib import epub
+
+# Suppress BeautifulSoup's XMLParsedAsHTMLWarning — ePub XHTML is intentionally
+# parsed with the HTML parser for robustness.
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 from src.models import EpubContent, Font, Image, SpineItem, StyleSheet, TextNode, TocEntry
 
