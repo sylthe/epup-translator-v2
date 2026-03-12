@@ -112,7 +112,11 @@ async def run_translation(
     config.output.analysis_dir.mkdir(parents=True, exist_ok=True)
     config.output.translated_dir.mkdir(parents=True, exist_ok=True)
 
-    cache = CacheManager(epub_content.book_id, config.output.cache_dir)
+    cache = CacheManager(
+        epub_content.book_id,
+        config.output.cache_dir,
+        analysis_dir=config.output.analysis_dir,
+    )
 
     # ---- Phase 1: Analysis ----
     console.rule("[bold]Phase 1 : Analyse du roman[/bold]")
@@ -126,6 +130,7 @@ async def run_translation(
     )
 
     display_analysis_summary(analysis, console)
+    console.print(f"  [dim]Analyse sauvegardée : {cache.analysis_path}[/dim]")
 
     if analysis_only:
         console.print("[green]Analyse terminée (mode --analysis-only).[/green]")
