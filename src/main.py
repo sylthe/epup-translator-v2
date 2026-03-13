@@ -250,9 +250,15 @@ def _print_usage(*clients: ClaudeClient) -> None:
         total_in   += s["input_tokens"]
         total_out  += s["output_tokens"]
         total_cost += s["estimated_cost_usd"]
+        cache_info = ""
+        if s["cache_read_tokens"] or s["cache_creation_tokens"]:
+            cache_info = (
+                f" | cache: {s['cache_creation_tokens']:,} write / "
+                f"{s['cache_read_tokens']:,} read"
+            )
         console.print(
             f"  [dim]{c.model}: {s['input_tokens']:,} in / "
-            f"{s['output_tokens']:,} out — ${s['estimated_cost_usd']:.4f}[/dim]"
+            f"{s['output_tokens']:,} out{cache_info} — ${s['estimated_cost_usd']:.4f}[/dim]"
         )
     if len(clients) > 1:
         console.print(

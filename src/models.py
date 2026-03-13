@@ -213,6 +213,7 @@ class TranslationConfig(BaseModel):
 
 
 class AnalysisConfig(BaseModel):
+    sample_max_tokens: int = 25000
     sample_chapters: list[int] = Field(default_factory=lambda: [1, 2, 3])
     include_middle: bool = True
     include_last: bool = True

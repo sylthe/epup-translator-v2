@@ -34,7 +34,7 @@ def build_analysis_sample(
     budget, truncating the last included chapter if needed.  This maximises
     character and plot coverage compared to a sparse selection.
     """
-    max_tokens = 50_000
+    max_tokens = config.analysis.sample_max_tokens
     chapters = [item for item in spine_items if item.is_chapter]
 
     if not chapters:
@@ -52,21 +52,21 @@ def build_analysis_sample(
         if not text:
             continue
 
-        tokens = client.count_tokens(text)
+        tokens = client.count_tokens(text)  # computed once, reused below
         remaining = max_tokens - total_tokens
 
         if tokens > remaining:
             if not parts:
-                # First chapter alone exceeds budget — truncate it
                 words = text.split()
                 word_limit = int(remaining * 0.75)
                 text = " ".join(words[:word_limit])
+                tokens = client.count_tokens(text)
             else:
-                break  # budget exhausted
+                break
 
         header = f"\n\n--- CHAPTER {idx + 1} ---\n\n"
         parts.append(header + text)
-        total_tokens += client.count_tokens(text)
+        total_tokens += tokens  # reuse — no second API call
 
         if total_tokens >= max_tokens:
             break
@@ -248,10 +248,11 @@ async def run_analysis(
             response = await client.complete(system, user)
             parsed = _parse_section_response(name, response)
 
-            # Retry once if parsing returned empty (malformed JSON)
+            # Retry once with an explicit JSON-only hint (cheaper than resending full sample)
             if not parsed:
                 progress.update(task, description=f"[yellow]{label} — nouvelle tentative…[/yellow]")
-                response = await client.complete(system, user)
+                retry_system = system + "\n\nATTENTION : ta réponse précédente n'était pas du JSON valide. Réponds UNIQUEMENT avec le JSON demandé, sans aucun texte avant ou après, sans bloc markdown."
+                response = await client.complete(retry_system, user)
                 parsed = _parse_section_response(name, response)
 
             results[name] = parsed

@@ -49,7 +49,7 @@ def mock_client():
     client = MagicMock(spec=ClaudeClient)
     client.count_tokens = MagicMock(return_value=50)
 
-    def _make_translation(system, user):
+    def _make_translation(system, user, **kwargs):
         # Extract nodes from the user prompt and return fake translations
         import re
         nodes_match = re.search(r'\[.*\]', user, re.DOTALL)

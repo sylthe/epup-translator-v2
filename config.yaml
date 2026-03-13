@@ -10,6 +10,7 @@ translation:
   batch_delay_seconds: 1
 
 analysis:
+  sample_max_tokens: 25000    # max tokens for analysis sample (was 50000)
   sample_chapters: [1, 2, 3]
   include_middle: true
   include_last: true

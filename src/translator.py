@@ -192,7 +192,7 @@ async def translate_segment(
         segment_context=context,
     )
 
-    response = await client.complete(system_prompt, user_prompt)
+    response = await client.complete(system_prompt, user_prompt, cache_system=True)
     return _parse_translation_response(response)
 
 
