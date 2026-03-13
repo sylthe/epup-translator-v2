@@ -1,5 +1,5 @@
 api:
-  model: "claude-sonnet-4-20250514"        # used for translation (Phase 2)
+  model: "claude-sonnet-4-6"        # used for translation (Phase 2)
   analysis_model: "claude-haiku-4-5-20251001"  # used for analysis (Phase 1)
   max_tokens_response: 16000
   temperature: 0.3

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Per-model pricing (USD per million tokens)
 _MODEL_PRICING: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-20250514": {
+    "claude-sonnet-4-6": {
         "input": 3.0, "output": 15.0,
         "cache_write": 3.75, "cache_read": 0.30,
     },
@@ -41,7 +41,7 @@ class ClaudeClient:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-6",
         max_tokens: int = 8192,
         temperature: float = 0.3,
     ) -> None:
