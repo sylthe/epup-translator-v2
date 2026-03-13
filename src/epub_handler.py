@@ -371,6 +371,10 @@ _ALINEA_STYLE = (
 )
 
 
+# Block-level tags that can be split into sibling elements for dialogue breaks.
+_BLOCK_TAGS = {"p", "div", "li", "td", "th", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+
 def _apply_translations(item: SpineItem) -> str:
     """
     Reinjection: replace text content of HTML nodes with their translations.
@@ -379,8 +383,10 @@ def _apply_translations(item: SpineItem) -> str:
     can no longer be found (e.g. the HTML was altered externally).
 
     If a translated text contains newlines (paragraph-break markers inserted
-    by apply_french_typography for em-dash dialogue splits), the original tag
-    is replaced by multiple sibling tags of the same type.
+    by apply_french_typography for em-dash dialogue splits) AND the tag is a
+    block-level element, the original tag is replaced by one sibling tag per
+    line.  For inline elements (span, em, strong…), newlines are flattened to
+    a space to avoid rendering two inline spans side-by-side.
     """
     soup = BeautifulSoup(item.html_content, "lxml")
 
@@ -391,29 +397,35 @@ def _apply_translations(item: SpineItem) -> str:
         if tag is None:
             continue
 
-        parts = node.translated_text.split("\n")
-        if len(parts) == 1:
-            # Simple case: replace text in-place
+        translated = node.translated_text
+        parts = translated.split("\n")
+
+        if len(parts) == 1 or tag.name not in _BLOCK_TAGS:
+            # Inline element or no split needed: flatten newlines to space
+            text = " ".join(p.strip() for p in parts if p.strip())
             for child in list(tag.children):
                 child.extract()
-            tag.append(NavigableString(parts[0]))
+            tag.append(NavigableString(text))
         else:
-            # Split into multiple sibling elements of the same tag type
+            # Block element: replace with one sibling <p> per line
             parent = tag.parent
             if parent is None:
                 for child in list(tag.children):
                     child.extract()
-                tag.append(NavigableString(node.translated_text))
+                tag.append(NavigableString(translated.replace("\n", " ")))
                 continue
             insert_pos = list(parent.children).index(tag)
+            tag_name = tag.name
             tag.decompose()
-            for i, part in enumerate(parts):
+            inserted = 0
+            for part in parts:
                 part = part.strip()
                 if not part:
                     continue
-                new_tag = soup.new_tag(tag.name)
+                new_tag = soup.new_tag(tag_name)
                 new_tag.append(NavigableString(part))
-                parent.insert(insert_pos + i, new_tag)
+                parent.insert(insert_pos + inserted, new_tag)
+                inserted += 1
 
     # Inject paragraph indentation CSS into <head>
     head = soup.find("head")
