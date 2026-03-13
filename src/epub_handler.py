@@ -403,6 +403,9 @@ h1, h2, h3, h4, h5, h6 {
 # Block-level tags that can be split into sibling elements for dialogue breaks.
 _BLOCK_TAGS = {"p", "div", "li", "td", "th", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6"}
 
+# Pre-compiled regex for xpath part parsing: "tagname" or "tagname[N]"
+_XPATH_PART_RE = re.compile(r"^(\w+)(?:\[(\d+)\])?$")
+
 
 def _apply_translations(item: SpineItem) -> str:
     """
@@ -443,7 +446,7 @@ def _apply_translations(item: SpineItem) -> str:
                     child.extract()
                 tag.append(NavigableString(translated.replace("\n", " ")))
                 continue
-            insert_pos = list(parent.children).index(tag)
+            insert_pos = next(i for i, c in enumerate(parent.children) if c is tag)
             tag_name = tag.name
             tag.decompose()
             inserted = 0
@@ -468,7 +471,7 @@ def _find_by_xpath(soup: BeautifulSoup, xpath: str) -> Tag | None:
     current: Any = soup
 
     for part in parts:
-        m = re.match(r"^(\w+)(?:\[(\d+)\])?$", part)
+        m = _XPATH_PART_RE.match(part)
         if not m:
             return None
         tag_name, idx_str = m.group(1), m.group(2)

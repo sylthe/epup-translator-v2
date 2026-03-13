@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
 
 from json_repair import repair_json
 
@@ -15,6 +14,7 @@ from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
 from src.models import AnalysisResult, Config, SpineItem, TextNode, TranslationResult
 from src.prompt_builder import PromptBuilder
+from src.utils import extract_json_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -121,18 +121,6 @@ def get_segment_context(
     return "Fin du segment précédent (pour la continuité) :\n" + "\n".join(lines)
 
 
-def _extract_json_candidate(text: str) -> str:
-    """Extract the most likely JSON object from a raw LLM response."""
-    stripped = text.strip()
-    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped)
-    if fence:
-        return fence.group(1).strip()
-    start, end = stripped.find("{"), stripped.rfind("}")
-    if start != -1 and end > start:
-        return stripped[start : end + 1]
-    return stripped
-
-
 def _parse_translation_response(text: str) -> TranslationResult:
     """
     Parse JSON from Claude's translation response using a cascade:
@@ -140,7 +128,7 @@ def _parse_translation_response(text: str) -> TranslationResult:
     2. json_repair (handles trailing commas, single quotes, etc.)
     3. Empty result (non-fatal — segment will have no translations)
     """
-    candidate = _extract_json_candidate(text)
+    candidate = extract_json_candidate(text)
 
     # Strategy 1: strict
     try:
@@ -177,12 +165,7 @@ async def translate_segment(
     """
     system_prompt = prompt_builder.build_translation_system_prompt(analysis)
 
-    # Build chapter context
     chapter_title = chapter_info.filename
-    ident = analysis.identification
-    if isinstance(ident, dict) and ident.get("titre_original"):
-        pass  # chapter title from filename is fine
-
     context = get_segment_context(segment_idx, segments, config.translation.overlap_paragraphs)
 
     user_prompt = prompt_builder.build_chapter_prompt(

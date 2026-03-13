@@ -9,11 +9,14 @@ import pytest
 
 from src.analyzer import (
     _merge_analysis,
-    _parse_section_response,
     build_analysis_sample,
     display_analysis_summary,
     run_analysis,
 )
+from src.utils import parse_llm_json
+
+def _parse_section_response(section_name: str, text: str) -> dict:
+    return parse_llm_json(text, section_name)
 from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
 from src.models import Config, EpubContent, SpineItem, TextNode

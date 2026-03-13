@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 from typing import Any
-
-from json_repair import repair_json
 
 from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
@@ -18,8 +14,11 @@ from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
 from src.models import AnalysisResult, Config, SpineItem
 from src.prompt_builder import ANALYSIS_SECTIONS, PromptBuilder
+from src.utils import parse_llm_json
 
 logger = logging.getLogger(__name__)
+
+_WORD_TO_TOKEN_RATIO = 0.75  # conservative estimate used when truncating to token budget
 
 
 def build_analysis_sample(
@@ -58,7 +57,7 @@ def build_analysis_sample(
         if tokens > remaining:
             if not parts:
                 words = text.split()
-                word_limit = int(remaining * 0.75)
+                word_limit = int(remaining * _WORD_TO_TOKEN_RATIO)
                 text = " ".join(words[:word_limit])
                 tokens = client.count_tokens(text)
             else:
@@ -74,64 +73,6 @@ def build_analysis_sample(
     return "".join(parts)
 
 
-def _extract_json_candidate(text: str) -> str:
-    """
-    Extract the most likely JSON object from a raw LLM response.
-
-    Strategy (in order):
-    1. Content inside a ```json ... ``` or ``` ... ``` fence
-    2. Substring from the first '{' to the last '}'
-    3. The original text stripped of leading/trailing whitespace
-    """
-    stripped = text.strip()
-
-    # 1. Markdown fence
-    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped)
-    if fence:
-        return fence.group(1).strip()
-
-    # 2. First '{' … last '}'
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return stripped[start : end + 1]
-
-    return stripped
-
-
-def _parse_section_response(section_name: str, text: str) -> dict[str, Any]:
-    """
-    Parse JSON from a Claude response using a cascade of strategies:
-
-    1. Standard json.loads on the extracted candidate
-    2. json_repair (handles trailing commas, single quotes, etc.)
-    3. Return an error dict (section will be empty, not fatal)
-    """
-    candidate = _extract_json_candidate(text)
-
-    # Strategy 1: strict parse
-    try:
-        data = json.loads(candidate)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    # Strategy 2: lenient repair
-    try:
-        repaired = repair_json(candidate, return_objects=True)
-        if isinstance(repaired, dict) and repaired:
-            logger.info("JSON repaired for section %r", section_name)
-            return repaired
-    except Exception:
-        pass
-
-    logger.warning(
-        "Could not parse JSON for section %r — section will be empty.\nRaw (first 300 chars): %s",
-        section_name,
-        text[:300],
-    )
-    return {}
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -246,14 +187,14 @@ async def run_analysis(
 
             system, user = prompt_builder.build_analysis_prompt(name, sample_text)
             response = await client.complete(system, user)
-            parsed = _parse_section_response(name, response)
+            parsed = parse_llm_json(response, name)
 
             # Retry once with an explicit JSON-only hint (cheaper than resending full sample)
             if not parsed:
                 progress.update(task, description=f"[yellow]{label} — nouvelle tentative…[/yellow]")
                 retry_system = system + "\n\nATTENTION : ta réponse précédente n'était pas du JSON valide. Réponds UNIQUEMENT avec le JSON demandé, sans aucun texte avant ou après, sans bloc markdown."
                 response = await client.complete(retry_system, user)
-                parsed = _parse_section_response(name, response)
+                parsed = parse_llm_json(response, name)
 
             results[name] = parsed
             progress.advance(task)
@@ -261,11 +202,7 @@ async def run_analysis(
             if config.translation.batch_delay_seconds > 0:
                 await asyncio.sleep(config.translation.batch_delay_seconds)
 
-    book_id = (
-        epub_content_or_sample.book_id
-        if hasattr(epub_content_or_sample, "book_id")
-        else "unknown"
-    )
+    book_id = getattr(epub_content_or_sample, "book_id", "unknown")
     analysis = _merge_analysis(results, book_id)
     cache.save_analysis(analysis)
     return analysis
