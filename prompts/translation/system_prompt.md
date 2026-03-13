@@ -37,7 +37,6 @@ Tu DOIS répondre en JSON valide selon ce format exact :
   "translated_nodes": [
     {
       "index": 0,
-      "original": "texte anglais",
       "translated": "texte français"
     }
   ],

@@ -108,7 +108,7 @@ class EpubContent:
 
 class TranslatedNode(BaseModel):
     index: int
-    original: str
+    original: str = ""   # no longer required in API response — kept for backward compat
     translated: str
 
 
@@ -206,7 +206,7 @@ class ApiConfig(BaseModel):
 
 
 class TranslationConfig(BaseModel):
-    max_tokens_per_segment: int = 16000
+    max_tokens_per_segment: int = 8000
     overlap_paragraphs: int = 3
     batch_delay_seconds: float = 1.0
 
