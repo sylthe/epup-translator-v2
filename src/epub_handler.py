@@ -363,12 +363,24 @@ def reconstruct_epub(content: EpubContent, output_path: str | Path) -> Path:
     return output_path
 
 
+_ALINEA_STYLE = (
+    "<style>"
+    "p { text-indent: 1.5em; margin-top: 0; margin-bottom: 0; }"
+    "p.noindent, p:first-of-type { text-indent: 0; }"
+    "</style>"
+)
+
+
 def _apply_translations(item: SpineItem) -> str:
     """
     Reinjection: replace text content of HTML nodes with their translations.
 
     Uses xpath addresses to locate nodes; falls back gracefully if a node
     can no longer be found (e.g. the HTML was altered externally).
+
+    If a translated text contains newlines (paragraph-break markers inserted
+    by apply_french_typography for em-dash dialogue splits), the original tag
+    is replaced by multiple sibling tags of the same type.
     """
     soup = BeautifulSoup(item.html_content, "lxml")
 
@@ -378,10 +390,40 @@ def _apply_translations(item: SpineItem) -> str:
         tag = _find_by_xpath(soup, node.xpath)
         if tag is None:
             continue
-        # Clear existing content and set new text
-        for child in list(tag.children):
-            child.extract()
-        tag.append(NavigableString(node.translated_text))
+
+        parts = node.translated_text.split("\n")
+        if len(parts) == 1:
+            # Simple case: replace text in-place
+            for child in list(tag.children):
+                child.extract()
+            tag.append(NavigableString(parts[0]))
+        else:
+            # Split into multiple sibling elements of the same tag type
+            parent = tag.parent
+            if parent is None:
+                for child in list(tag.children):
+                    child.extract()
+                tag.append(NavigableString(node.translated_text))
+                continue
+            insert_pos = list(parent.children).index(tag)
+            tag.decompose()
+            for i, part in enumerate(parts):
+                part = part.strip()
+                if not part:
+                    continue
+                new_tag = soup.new_tag(tag.name)
+                new_tag.append(NavigableString(part))
+                parent.insert(insert_pos + i, new_tag)
+
+    # Inject paragraph indentation CSS into <head>
+    head = soup.find("head")
+    if head:
+        style_tag = soup.new_tag("style")
+        style_tag.string = (
+            "p{text-indent:1.5em;margin-top:0;margin-bottom:0;}"
+            "p.noindent,h1,h2,h3,h4,h5,h6{text-indent:0;}"
+        )
+        head.append(style_tag)  # type: ignore[union-attr]
 
     return str(soup)
 

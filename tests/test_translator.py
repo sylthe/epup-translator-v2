@@ -136,6 +136,15 @@ def test_typography_dialogue_dash():
     assert result.startswith("—")
 
 
+def test_typography_dialogue_split_inserts_newline():
+    text = "Elle enfila sa veste. — Euh. Eh bien…"
+    result = apply_french_typography(text)
+    assert "\n" in result
+    lines = result.split("\n")
+    assert lines[0].endswith(".")
+    assert lines[1].startswith("—")
+
+
 def test_typography_idempotent():
     text = "Elle cria\u202f!"
     assert apply_french_typography(text) == text

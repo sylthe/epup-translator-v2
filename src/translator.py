@@ -43,6 +43,11 @@ def apply_french_typography(text: str) -> str:
     # --- Dialogue: replace leading ASCII dash(es) with em-dash ---
     text = re.sub(r"^--?\s", "— ", text, flags=re.MULTILINE)
 
+    # --- Dialogue split: em-dash after sentence-ending punctuation → new paragraph ---
+    # "Narrative sentence. — Dialogue" becomes two lines that _apply_translations
+    # will render as two separate <p> elements.
+    text = re.sub(r"([.!?»])\s+—\s", r"\1\n— ", text)
+
     # --- Collapse multiple spaces (keep newlines) ---
     text = re.sub(r"[ \t]{2,}", " ", text)
 
