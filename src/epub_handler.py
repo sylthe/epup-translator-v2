@@ -310,21 +310,10 @@ def reconstruct_epub(content: EpubContent, output_path: str | Path) -> Path:
         new_book.set_identifier(meta["identifier"])
     new_book.add_metadata("DC", "contributor", "Traduit par IA (Claude)")
 
-    # Spine items
-    spine_ids: list[str] = []
-    for item in content.spine_items:
-        translated_html = _apply_translations(item)
-        epub_item = epub.EpubHtml(
-            uid=item.id,
-            file_name=item.filename,
-            media_type="application/xhtml+xml",
-            content=translated_html.encode("utf-8"),
-        )
-        new_book.add_item(epub_item)
-        spine_ids.append(item.id)
-
-    # CSS — append French typography rules to first stylesheet (or create one)
+    # CSS — append French typography rules to first stylesheet (or create one).
+    # Resolved before spine items so we know whether to inject a <link> tag.
     styles = content.styles
+    extra_css_link: str | None = None
     if styles:
         first = styles[0]
         patched = StyleSheet(
@@ -333,9 +322,9 @@ def reconstruct_epub(content: EpubContent, output_path: str | Path) -> Path:
         )
         styles = [patched] + styles[1:]
     else:
-        styles = [StyleSheet(filename="french-typography.css", content=_FRENCH_TYPOGRAPHY_CSS)]
-        # Link the new stylesheet in every spine item HTML
-        # (handled below via _apply_translations which injects a <link> when no styles exist)
+        css_filename = "french-typography.css"
+        styles = [StyleSheet(filename=css_filename, content=_FRENCH_TYPOGRAPHY_CSS)]
+        extra_css_link = css_filename
 
     for style in styles:
         css_item = epub.EpubItem(
@@ -345,6 +334,19 @@ def reconstruct_epub(content: EpubContent, output_path: str | Path) -> Path:
             content=style.content,
         )
         new_book.add_item(css_item)
+
+    # Spine items
+    spine_ids: list[str] = []
+    for item in content.spine_items:
+        translated_html = _apply_translations(item, extra_css_link=extra_css_link)
+        epub_item = epub.EpubHtml(
+            uid=item.id,
+            file_name=item.filename,
+            media_type="application/xhtml+xml",
+            content=translated_html.encode("utf-8"),
+        )
+        new_book.add_item(epub_item)
+        spine_ids.append(item.id)
 
     # Images
     for img in content.images:
@@ -383,7 +385,7 @@ def reconstruct_epub(content: EpubContent, output_path: str | Path) -> Path:
 _FRENCH_TYPOGRAPHY_CSS: bytes = b"""
 /* === Typographie francaise (epub-translator) === */
 p {
-  text-indent: 1em;
+  text-indent: 1em !important;
   margin-top: 0;
   margin-bottom: 0;
 }
@@ -392,7 +394,7 @@ p:first-child,
 h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p,
 hr + p,
 p.noindent {
-  text-indent: 0;
+  text-indent: 0 !important;
 }
 h1, h2, h3, h4, h5, h6 {
   text-indent: 0;
@@ -407,7 +409,7 @@ _BLOCK_TAGS = {"p", "div", "li", "td", "th", "blockquote", "h1", "h2", "h3", "h4
 _XPATH_PART_RE = re.compile(r"^(\w+)(?:\[(\d+)\])?$")
 
 
-def _apply_translations(item: SpineItem) -> str:
+def _apply_translations(item: SpineItem, *, extra_css_link: str | None = None) -> str:
     """
     Reinjection: replace text content of HTML nodes with their translations.
 
@@ -419,8 +421,19 @@ def _apply_translations(item: SpineItem) -> str:
     block-level element, the original tag is replaced by one sibling tag per
     line.  For inline elements (span, em, strong…), newlines are flattened to
     a space to avoid rendering two inline spans side-by-side.
+
+    If *extra_css_link* is set, a <link> tag is injected into <head> (used when
+    no stylesheet existed in the source epub and we created a new one).
     """
     soup = BeautifulSoup(item.html_content, "lxml")
+
+    if extra_css_link:
+        head = soup.find("head")
+        if head:
+            link_tag = soup.new_tag(
+                "link", rel="stylesheet", type="text/css", href=extra_css_link
+            )
+            head.append(link_tag)
 
     for node in item.text_nodes:
         if node.translated_text is None:
