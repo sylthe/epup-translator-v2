@@ -111,7 +111,12 @@ async def run_translation(
 
     Returns the output path on success, None if aborted.
     """
-    # ---- Shared objects ----
+    # ---- Clients (separate models for analysis vs translation) ----
+    analysis_client = ClaudeClient(
+        model=config.api.analysis_model,
+        max_tokens=config.api.max_tokens_response,
+        temperature=config.api.temperature,
+    )
     client = ClaudeClient(
         model=config.api.model,
         max_tokens=config.api.max_tokens_response,
@@ -148,7 +153,7 @@ async def run_translation(
         sys.exit(1)
 
     analysis = await run_analysis(
-        epub_content, client, prompt_builder, cache, config, console=console
+        epub_content, analysis_client, prompt_builder, cache, config, console=console
     )
 
     display_analysis_summary(analysis, console)
@@ -156,7 +161,7 @@ async def run_translation(
 
     if analysis_only:
         console.print("[green]Analyse terminée (mode --analysis-only).[/green]")
-        _print_usage(client)
+        _print_usage(analysis_client)
         return None
 
     # ---- Human gate ----
@@ -220,17 +225,26 @@ async def run_translation(
     result_path = reconstruct_epub(epub_content, output)
     console.print(f"\n[bold green]Traduction terminée : {result_path}[/bold green]")
 
-    _print_usage(client)
+    _print_usage(analysis_client, client)
     return str(result_path)
 
 
-def _print_usage(client: ClaudeClient) -> None:
-    summary = client.get_usage_summary()
-    console.print(
-        f"\n[dim]Tokens utilisés: {summary['input_tokens']:,} input / "
-        f"{summary['output_tokens']:,} output — "
-        f"Coût estimé: ${summary['estimated_cost_usd']:.4f}[/dim]"
-    )
+def _print_usage(*clients: ClaudeClient) -> None:
+    total_in = total_out = total_cost = 0.0
+    for c in clients:
+        s = c.get_usage_summary()
+        total_in   += s["input_tokens"]
+        total_out  += s["output_tokens"]
+        total_cost += s["estimated_cost_usd"]
+        console.print(
+            f"  [dim]{c.model}: {s['input_tokens']:,} in / "
+            f"{s['output_tokens']:,} out — ${s['estimated_cost_usd']:.4f}[/dim]"
+        )
+    if len(clients) > 1:
+        console.print(
+            f"  [dim]Total : {int(total_in):,} in / {int(total_out):,} out — "
+            f"[bold]${total_cost:.4f}[/bold][/dim]"
+        )
 
 
 # ---------------------------------------------------------------------------
