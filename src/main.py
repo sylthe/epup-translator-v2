@@ -160,11 +160,15 @@ async def run_translation(
         return None
 
     # ---- Human gate ----
-    if not click.confirm("\nL'analyse est-elle satisfaisante ? (non = abandonner)"):
+    console.print(f"\n  Vous pouvez modifier [cyan]{cache.analysis_path}[/cyan] avant de continuer.")
+    if not click.confirm("L'analyse est-elle satisfaisante ? (non = abandonner)"):
         console.print(
-            "Vous pouvez modifier le fichier d'analyse et relancer avec --skip-analysis."
+            "Relancez avec --skip-analysis pour utiliser le fichier modifié."
         )
         return None
+
+    # Reload from disk so any manual edits made before confirming are picked up
+    analysis = cache.load_analysis()
 
     # ---- Phase 2: Translation ----
     console.rule("[bold]Phase 2 : Traduction[/bold]")
