@@ -18,6 +18,36 @@ from src.prompt_builder import PromptBuilder
 
 logger = logging.getLogger(__name__)
 
+NNBSP = "\u202f"   # narrow no-break space (before punctuation marks)
+NBSP  = "\u00a0"   # no-break space (after « and before »)
+
+
+def apply_french_typography(text: str) -> str:
+    """
+    Post-processing pass to enforce French typographic conventions.
+
+    Applied after every translated node as a safety net in case Claude
+    misses a rule.  All transformations are idempotent.
+    """
+    # --- Guillemets: replace ASCII double-quotes with French guillemets ---
+    # Only when used as quotation marks (word chars on both sides)
+    text = re.sub(r'"(\S[^"]*\S|\S)"', f"«{NBSP}\\1{NBSP}»", text)
+
+    # --- Non-breaking space before high punctuation ---
+    # Remove any existing space (regular, nbsp, nnbsp) then add the correct one
+    text = re.sub(r"[ \u00a0\u202f]*([;:!?»])", f"{NNBSP}\\1", text)
+
+    # --- Non-breaking space after opening guillemet ---
+    text = re.sub(r"«[ \u00a0\u202f]*", f"«{NBSP}", text)
+
+    # --- Dialogue: replace leading ASCII dash(es) with em-dash ---
+    text = re.sub(r"^--?\s", "— ", text, flags=re.MULTILINE)
+
+    # --- Collapse multiple spaces (keep newlines) ---
+    text = re.sub(r"[ \t]{2,}", " ", text)
+
+    return text
+
 
 def split_chapter_into_segments(
     text_nodes: list[TextNode],
@@ -175,7 +205,7 @@ def apply_translations(
     for translated in result.translated_nodes:
         idx = translated.index
         if idx in node_map:
-            node_map[idx].translated_text = translated.translated
+            node_map[idx].translated_text = apply_french_typography(translated.translated)
         else:
             logger.warning("Translation index %d out of range (segment has %d nodes)", idx, len(text_nodes))
 
