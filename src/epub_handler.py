@@ -323,8 +323,21 @@ def reconstruct_epub(content: EpubContent, output_path: str | Path) -> Path:
         new_book.add_item(epub_item)
         spine_ids.append(item.id)
 
-    # CSS
-    for style in content.styles:
+    # CSS — append French typography rules to first stylesheet (or create one)
+    styles = list(content.styles)
+    if styles:
+        first = styles[0]
+        patched = StyleSheet(
+            filename=first.filename,
+            content=first.content + _FRENCH_TYPOGRAPHY_CSS,
+        )
+        styles = [patched] + styles[1:]
+    else:
+        styles = [StyleSheet(filename="french-typography.css", content=_FRENCH_TYPOGRAPHY_CSS)]
+        # Link the new stylesheet in every spine item HTML
+        # (handled below via _apply_translations which injects a <link> when no styles exist)
+
+    for style in styles:
         css_item = epub.EpubItem(
             uid=f"css_{style.filename}",
             file_name=style.filename,
@@ -363,12 +376,28 @@ def reconstruct_epub(content: EpubContent, output_path: str | Path) -> Path:
     return output_path
 
 
-_ALINEA_STYLE = (
-    "<style>"
-    "p { text-indent: 1.5em; margin-top: 0; margin-bottom: 0; }"
-    "p.noindent, p:first-of-type { text-indent: 0; }"
-    "</style>"
-)
+# French typography CSS appended to the first existing stylesheet.
+# Rules follow the classic French norm:
+#   - every paragraph gets a 1em indent
+#   - EXCEPT the first paragraph of a section and the first after a heading or hr
+_FRENCH_TYPOGRAPHY_CSS: bytes = b"""
+/* === Typographie francaise (epub-translator) === */
+p {
+  text-indent: 1em;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+/* No indent: first paragraph of a block, after headings, after scene-break */
+p:first-child,
+h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p,
+hr + p,
+p.noindent {
+  text-indent: 0;
+}
+h1, h2, h3, h4, h5, h6 {
+  text-indent: 0;
+}
+"""
 
 
 # Block-level tags that can be split into sibling elements for dialogue breaks.
@@ -426,16 +455,6 @@ def _apply_translations(item: SpineItem) -> str:
                 new_tag.append(NavigableString(part))
                 parent.insert(insert_pos + inserted, new_tag)
                 inserted += 1
-
-    # Inject paragraph indentation CSS into <head>
-    head = soup.find("head")
-    if head:
-        style_tag = soup.new_tag("style")
-        style_tag.string = (
-            "p{text-indent:1.5em;margin-top:0;margin-bottom:0;}"
-            "p.noindent,h1,h2,h3,h4,h5,h6{text-indent:0;}"
-        )
-        head.append(style_tag)  # type: ignore[union-attr]
 
     return str(soup)
 
