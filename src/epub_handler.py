@@ -33,12 +33,27 @@ _STRUCTURAL_TAGS = {"body", "section", "article", "main", "header", "footer", "n
 _SKIP_TAGS = {"script", "style", "head", "meta", "link", "title"}
 
 
-def _sha256(path: Path) -> str:
+def _sha256_short(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
-    return h.hexdigest()
+    return h.hexdigest()[:8]
+
+
+def _slug(text: str) -> str:
+    """Convert a title to a safe filename slug (lowercase, hyphens, ASCII)."""
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)   # remove punctuation
+    text = re.sub(r"[\s_]+", "-", text)    # spaces/underscores → hyphens
+    text = re.sub(r"-+", "-", text)        # collapse multiple hyphens
+    return text[:50].strip("-") or "book"  # cap at 50 chars
+
+
+def _make_book_id(title: str | None, path: Path) -> str:
+    """Return a human-readable, deterministic book ID: slug-XXXXXXXX."""
+    slug = _slug(title or path.stem)
+    return f"{slug}-{_sha256_short(path)}"
 
 
 def _build_xpath(tag: Tag) -> str:
@@ -138,7 +153,6 @@ def extract_epub(path: str | Path) -> EpubContent:
     Extracts text nodes for translation without modifying the HTML.
     """
     path = Path(path)
-    book_id = _sha256(path)
     book: epub.EpubBook = epub.read_epub(str(path))
 
     # ---- Metadata ----
@@ -152,6 +166,8 @@ def extract_epub(path: str | Path) -> EpubContent:
         "date": _first(book.get_metadata("DC", "date")),
         "rights": _first(book.get_metadata("DC", "rights")),
     }
+
+    book_id = _make_book_id(metadata.get("title"), path)
 
     # ---- Spine items ----
     spine_items: list[SpineItem] = []
