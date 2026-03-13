@@ -93,12 +93,13 @@ def _as_list(value: Any) -> list[Any]:
 
 def _merge_analysis(results: dict[str, dict[str, Any]], book_id: str) -> AnalysisResult:
     """Merge per-section dicts into a single AnalysisResult."""
+    # Flatten all section dicts into one for O(1) lookups
+    flat: dict[str, Any] = {}
+    for section_data in results.values():
+        flat.update(section_data)
 
     def _get(key: str, default: Any = None) -> Any:
-        for section_data in results.values():
-            if key in section_data:
-                return section_data[key]
-        return default
+        return flat.get(key, default)
 
     try:
         return AnalysisResult(

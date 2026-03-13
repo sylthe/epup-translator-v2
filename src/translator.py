@@ -235,8 +235,9 @@ async def translate_chapter(
     )
 
     n_segments = len(segments)
+    show_segment_progress = progress is not None and progress_task is not None and n_segments > 1
     for seg_idx, segment in enumerate(segments):
-        if progress is not None and progress_task is not None and n_segments > 1:
+        if show_segment_progress:
             chap_label = f"[cyan]Chapitre {chapter_num + 1}[/cyan] — segment {seg_idx + 1}/{n_segments}"
             progress.update(progress_task, description=chap_label)
 

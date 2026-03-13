@@ -88,7 +88,7 @@ def _extract_text_nodes(soup: BeautifulSoup) -> list[TextNode]:
     nodes: list[TextNode] = []
     visited: set[int] = set()
 
-    def _walk(element: Any, depth: int = 0) -> None:
+    def _walk(element: Any) -> None:
         if not isinstance(element, Tag):
             return
         if element.name in _SKIP_TAGS:
@@ -128,7 +128,7 @@ def _extract_text_nodes(soup: BeautifulSoup) -> list[TextNode]:
 
         # Recurse into children
         for child in child_tags:
-            _walk(child, depth + 1)
+            _walk(child)
 
     _walk(soup)
     return nodes
@@ -324,7 +324,7 @@ def reconstruct_epub(content: EpubContent, output_path: str | Path) -> Path:
         spine_ids.append(item.id)
 
     # CSS — append French typography rules to first stylesheet (or create one)
-    styles = list(content.styles)
+    styles = content.styles
     if styles:
         first = styles[0]
         patched = StyleSheet(
@@ -477,10 +477,17 @@ def _find_by_xpath(soup: BeautifulSoup, xpath: str) -> Tag | None:
         tag_name, idx_str = m.group(1), m.group(2)
         idx = int(idx_str) if idx_str else 1
 
-        matching = [child for child in current.children if isinstance(child, Tag) and child.name == tag_name]
-        if len(matching) < idx:
+        count = 0
+        found = None
+        for child in current.children:
+            if isinstance(child, Tag) and child.name == tag_name:
+                count += 1
+                if count == idx:
+                    found = child
+                    break
+        if found is None:
             return None
-        current = matching[idx - 1]
+        current = found
 
     return current if isinstance(current, Tag) else None
 
