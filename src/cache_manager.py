@@ -140,13 +140,18 @@ class CacheManager:
         ]
 
     def get_last_completed_chapter(self) -> int:
-        """Return the highest completed chapter number, or -1 if none."""
-        if not self._state.completed_chapters:
-            return -1
-        return self._state.completed_chapters[-1]
+        """Return the highest completed chapter whose cache file still exists, or -1."""
+        for chapter_num in reversed(self._state.completed_chapters):
+            if self._chapter_path(chapter_num).exists():
+                return chapter_num
+        return -1
 
     def is_chapter_complete(self, chapter_num: int) -> bool:
-        return chapter_num in self._state.completed_chapters
+        """True only if the chapter is marked complete AND its cache file exists."""
+        return (
+            chapter_num in self._state.completed_chapters
+            and self._chapter_path(chapter_num).exists()
+        )
 
     # ------------------------------------------------------------------
     # Misc

@@ -185,11 +185,25 @@ async def run_translation(
         start_chapter = last + 1
         if start_chapter > 0:
             console.print(f"Reprise depuis le chapitre {start_chapter}.")
-            # Restore already-translated chapters from cache
+            # Restore already-translated chapters; skip any whose file was deleted
+            missing: list[int] = []
             for chap in chapters[:start_chapter]:
-                chap.text_nodes = cache.load_chapter_result(chap.chapter_number or 0)
+                chapter_num = chap.chapter_number or 0
+                if cache.is_chapter_complete(chapter_num):
+                    chap.text_nodes = cache.load_chapter_result(chapter_num)
+                else:
+                    missing.append(chapter_num + 1)
+            if missing:
+                console.print(
+                    f"  [yellow]Fichiers cache manquants pour les chapitres {missing} "
+                    f"— ils seront retraduits.[/yellow]"
+                )
 
-    chapters_to_translate = chapters[start_chapter:]
+    # Include chapters whose cache was deleted so they get retranslated
+    chapters_to_translate = [
+        chap for chap in chapters
+        if not cache.is_chapter_complete(chap.chapter_number or 0)
+    ]
 
     with Progress(
         TextColumn("[progress.description]{task.description}"),
