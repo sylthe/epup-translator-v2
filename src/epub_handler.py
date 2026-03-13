@@ -435,7 +435,9 @@ def _apply_translations(item: SpineItem, *, extra_css_link: str | None = None) -
             )
             head.append(link_tag)
 
-    for node in item.text_nodes:
+    # Process in reverse order so that splitting a block element (em-dash dialogue)
+    # into multiple siblings does not shift the xpath indices of preceding nodes.
+    for node in reversed(item.text_nodes):
         if node.translated_text is None:
             continue
         tag = _find_by_xpath(soup, node.xpath)
