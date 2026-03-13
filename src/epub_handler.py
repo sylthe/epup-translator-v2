@@ -463,13 +463,14 @@ def _apply_translations(item: SpineItem, *, extra_css_link: str | None = None) -
                 continue
             insert_pos = next(i for i, c in enumerate(parent.children) if c is tag)
             tag_name = tag.name
+            tag_attrs = dict(tag.attrs)  # save before decompose
             tag.decompose()
             inserted = 0
             for part in parts:
                 part = part.strip()
                 if not part:
                     continue
-                new_tag = soup.new_tag(tag_name)
+                new_tag = soup.new_tag(tag_name, attrs=tag_attrs)
                 new_tag.append(NavigableString(part))
                 parent.insert(insert_pos + inserted, new_tag)
                 inserted += 1
