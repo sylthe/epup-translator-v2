@@ -1,6 +1,6 @@
 api:
   model: "claude-sonnet-4-20250514"
-  max_tokens_response: 8192
+  max_tokens_response: 16000
   temperature: 0.3
 
 translation:

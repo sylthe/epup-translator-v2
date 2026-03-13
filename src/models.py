@@ -201,7 +201,7 @@ class AnalysisResult(BaseModel):
 
 class ApiConfig(BaseModel):
     model: str = "claude-sonnet-4-20250514"
-    max_tokens_response: int = 8192
+    max_tokens_response: int = 16000
     temperature: float = 0.3
 
 

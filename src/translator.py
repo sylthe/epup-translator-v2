@@ -238,5 +238,32 @@ async def translate_chapter(
             for note in result.translation_notes:
                 logger.debug("Translation note [ch%d seg%d]: %s", chapter_num, seg_idx, note)
 
+        # Retry any nodes that were not translated (truncated API response)
+        missed = [n for n in segment if n.translated_text is None]
+        if missed:
+            logger.warning(
+                "Chapter %d seg %d: %d/%d nodes untranslated — retrying",
+                chapter_num, seg_idx, len(missed), len(segment),
+            )
+            retry_result = await translate_segment(
+                segment=missed,
+                analysis=analysis,
+                chapter_info=chapter,
+                segment_idx=seg_idx,
+                segments=segments,
+                client=client,
+                prompt_builder=prompt_builder,
+                config=config,
+            )
+            apply_translations(missed, retry_result)
+            still_missed = [n for n in missed if n.translated_text is None]
+            if still_missed:
+                logger.warning(
+                    "Chapter %d seg %d: %d node(s) still untranslated after retry — keeping original",
+                    chapter_num, seg_idx, len(still_missed),
+                )
+                for node in still_missed:
+                    node.translated_text = node.original_text
+
     cache.save_chapter_result(chapter_num, chapter.text_nodes)
     return chapter
