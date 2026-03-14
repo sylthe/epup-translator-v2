@@ -99,6 +99,8 @@ class EpubContent:
     images: list[Image] = field(default_factory=list)
     fonts: list[Font] = field(default_factory=list)
     toc: list[TocEntry] = field(default_factory=list)
+    source_path: Path | None = field(default=None)
+    """Path to the original ePub file (used for zipfile-based reconstruction)."""
 
 
 # ---------------------------------------------------------------------------
