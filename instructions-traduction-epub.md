@@ -1,5 +1,6 @@
 # Instructions pour Claude Code — Application de traduction de romans ePub (EN→FR)
 
+
 ## Contexte du projet
 
 Je veux une application Python autonome qui traduit des romans au format `.epub` de l'anglais au français, en conservant intégralement la mise en page du fichier original. L'application doit reproduire le processus d'un traducteur professionnel : **d'abord analyser l'œuvre selon une grille complète, puis traduire en s'appuyant sur cette analyse.**
