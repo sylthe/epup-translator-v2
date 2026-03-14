@@ -1,46 +1,26 @@
-Établis le glossaire des termes techniques, jargon professionnel, et idiomes du roman.
+Établis le glossaire des termes clés et des expressions idiomatiques du roman.
 
 Réponds UNIQUEMENT en JSON valide selon ce schéma exact :
 
 ```json
 {
-  "glossaire": {
-    "termes_techniques": [
-      {
-        "en": "string",
-        "fr": "string",
-        "contexte": "string",
-        "domaine": "string (médecine, pompier, juridique, etc.)"
-      }
-    ],
-    "jargon_professionnel": [
-      {
-        "en": "string",
-        "fr": "string",
-        "contexte": "string"
-      }
-    ],
-    "termes_recurrents": [
-      {
-        "en": "string",
-        "fr": "string",
-        "frequence": "élevée / moyenne / faible",
-        "notes": "string ou null"
-      }
-    ]
-  },
+  "glossaire": [
+    {
+      "en": "string (terme anglais)",
+      "fr": "string (traduction française)",
+      "contexte": "string (domaine ou usage : médecine, pompier, juridique, argot, etc.)"
+    }
+  ],
   "idiomes": [
     {
-      "expression": "string",
-      "sens_litteral": "string",
-      "sens_idiomatique": "string",
-      "traduction_fr": "string",
-      "contexte": "string"
+      "expression": "string (expression anglaise)",
+      "sens": "string (sens idiomatique en français)",
+      "traduction": "string (traduction française recommandée)"
     }
   ],
   "contraintes_grammaticales": [
     {
-      "type": "string (ambiguïté de genre, phrasal verb, etc.)",
+      "type": "string (ambiguïté de genre, phrasal verb, temps narratif, etc.)",
       "exemple_en": "string",
       "strategie": "string",
       "exemple_fr": "string ou null"

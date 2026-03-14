@@ -9,11 +9,14 @@ import pytest
 
 from src.analyzer import (
     _merge_analysis,
-    _parse_section_response,
     build_analysis_sample,
     display_analysis_summary,
     run_analysis,
 )
+from src.utils import parse_llm_json
+
+def _parse_section_response(section_name: str, text: str) -> dict:
+    return parse_llm_json(text, section_name)
 from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
 from src.models import Config, EpubContent, SpineItem, TextNode
@@ -146,6 +149,27 @@ def test_merge_analysis_returns_analysis_result():
     assert analysis.book_id == "book-123"
     assert analysis.identification["titre_original"] == "My Novel"
     assert analysis.cadre_narratif["point_de_vue"] == "1re personne"
+
+
+def test_merge_analysis_extracts_personnages_and_relations():
+    results = {
+        "personnages_et_relations": {
+            "personnages": [
+                {"nom": "Alice", "genre": "féminin", "role_narratif": "protagoniste"}
+            ],
+            "relations": [
+                {"personnages": ["Alice", "Bob"], "relation": "amicale", "registre": "tu"}
+            ],
+            "glossaire": [{"en": "grumpy", "fr": "grincheux", "contexte": "adjectif"}],
+        }
+    }
+    analysis = _merge_analysis(results, "book-xyz")
+    assert len(analysis.personnages) == 1
+    assert analysis.personnages[0].nom == "Alice"
+    assert len(analysis.relations) == 1
+    assert "Alice" in analysis.relations[0].personnages
+    assert len(analysis.glossaire) == 1
+    assert analysis.glossaire[0].en == "grumpy"
 
 
 @pytest.mark.asyncio

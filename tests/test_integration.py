@@ -105,7 +105,7 @@ async def test_resume_from_cache(
     )
 
     # New instance — simulates process restart (same book_id as the cache)
-    new_cache = CacheManager(test_cache.book_id, test_cache.cache_dir)
+    new_cache = CacheManager(test_cache.book_id, test_cache.cache_dir.parent)
     assert new_cache.is_chapter_complete(0)
     last = new_cache.get_last_completed_chapter()
     assert last == 0  # only first chapter done

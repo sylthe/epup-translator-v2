@@ -14,7 +14,7 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, T
 from src.analyzer import display_analysis_summary, run_analysis
 from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
-from src.epub_handler import extract_epub, reconstruct_epub
+from src.epub_handler import apply_cover_badge, extract_epub, reconstruct_epub
 from src.models import Config
 from src.prompt_builder import PromptBuilder
 from src.translator import translate_chapter
@@ -69,6 +69,28 @@ def translate(
     )
 
 
+@cli.command("clear-cache")
+@click.argument("epub_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--config", "config_path", type=click.Path(path_type=Path), default="config.yaml", show_default=True, help="Config YAML file.")
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt.")
+def clear_cache(epub_path: Path, config_path: Path, yes: bool) -> None:
+    """Supprime le cache (analyse + chapitres) pour un ePub donné."""
+    config = load_config(config_path)
+    epub_content = extract_epub(epub_path)
+    cache = CacheManager(
+        epub_content.book_id,
+        config.output.cache_dir,
+        analysis_dir=config.output.analysis_dir,
+    )
+    console.print(f"  Livre  : [cyan]{epub_content.metadata.get('title', epub_path.name)}[/cyan]")
+    console.print(f"  book_id: [dim]{epub_content.book_id}[/dim]")
+    if not yes and not click.confirm("Supprimer le cache pour ce livre ?"):
+        console.print("Annulé.")
+        return
+    cache.reset()
+    console.print("[green]Cache supprimé.[/green]")
+
+
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
@@ -89,7 +111,12 @@ async def run_translation(
 
     Returns the output path on success, None if aborted.
     """
-    # ---- Shared objects ----
+    # ---- Clients (separate models for analysis vs translation) ----
+    analysis_client = ClaudeClient(
+        model=config.api.analysis_model,
+        max_tokens=config.api.max_tokens_response,
+        temperature=config.api.temperature,
+    )
     client = ClaudeClient(
         model=config.api.model,
         max_tokens=config.api.max_tokens_response,
@@ -126,7 +153,7 @@ async def run_translation(
         sys.exit(1)
 
     analysis = await run_analysis(
-        epub_content, client, prompt_builder, cache, config, console=console
+        epub_content, analysis_client, prompt_builder, cache, config, console=console
     )
 
     display_analysis_summary(analysis, console)
@@ -134,15 +161,19 @@ async def run_translation(
 
     if analysis_only:
         console.print("[green]Analyse terminée (mode --analysis-only).[/green]")
-        _print_usage(client)
+        _print_usage(analysis_client)
         return None
 
     # ---- Human gate ----
-    if not click.confirm("\nL'analyse est-elle satisfaisante ? (non = abandonner)"):
+    console.print(f"\n  Vous pouvez modifier [cyan]{cache.analysis_path}[/cyan] avant de continuer.")
+    if not click.confirm("L'analyse est-elle satisfaisante ? (non = abandonner)"):
         console.print(
-            "Vous pouvez modifier le fichier d'analyse et relancer avec --skip-analysis."
+            "Relancez avec --skip-analysis pour utiliser le fichier modifié."
         )
         return None
+
+    # Reload from disk so any manual edits made before confirming are picked up
+    analysis = cache.load_analysis()
 
     # ---- Phase 2: Translation ----
     console.rule("[bold]Phase 2 : Traduction[/bold]")
@@ -153,12 +184,26 @@ async def run_translation(
         last = cache.get_last_completed_chapter()
         start_chapter = last + 1
         if start_chapter > 0:
-            console.print(f"Reprise depuis le chapitre {start_chapter}.")
-            # Restore already-translated chapters from cache
+            console.print(f"Reprise depuis le fichier interne n°{start_chapter}.")
+            # Restore already-translated chapters; skip any whose file was deleted
+            missing: list[str] = []
             for chap in chapters[:start_chapter]:
-                chap.text_nodes = cache.load_chapter_result(chap.chapter_number or 0)
+                chapter_num = chap.chapter_number or 0
+                if cache.is_chapter_complete(chapter_num):
+                    chap.text_nodes = cache.load_chapter_result(chapter_num)
+                else:
+                    missing.append(Path(chap.filename).name)
+            if missing:
+                console.print(
+                    f"  [yellow]Cache manquant pour : {', '.join(missing)} "
+                    f"— ils seront retraduits.[/yellow]"
+                )
 
-    chapters_to_translate = chapters[start_chapter:]
+    # Include chapters whose cache was deleted so they get retranslated
+    chapters_to_translate = [
+        chap for chap in chapters
+        if not cache.is_chapter_complete(chap.chapter_number or 0)
+    ]
 
     with Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -169,8 +214,9 @@ async def run_translation(
     ) as progress:
         task = progress.add_task("Traduction", total=len(chapters_to_translate))
 
+        total_chaps = len(chapters_to_translate)
         for i, chapter in enumerate(chapters_to_translate):
-            label = f"[cyan]Chapitre {(chapter.chapter_number or 0) + 1}[/cyan] ({chapter.filename})"
+            label = f"[cyan]↻[/cyan] {Path(chapter.filename).name}"
             progress.update(task, description=label)
             await translate_chapter(
                 chapter=chapter,
@@ -192,19 +238,39 @@ async def run_translation(
         output = config.output.translated_dir / f"{stem}_fr.epub"
 
     result_path = reconstruct_epub(epub_content, output)
+
+    badge_path = Path(__file__).parent.parent / "badge-IA.png"
+    if apply_cover_badge(epub_path.parent, result_path, badge_path):
+        console.print("[green]Badge IA appliqué sur la couverture.[/green]")
+
     console.print(f"\n[bold green]Traduction terminée : {result_path}[/bold green]")
 
-    _print_usage(client)
+    _print_usage(analysis_client, client)
     return str(result_path)
 
 
-def _print_usage(client: ClaudeClient) -> None:
-    summary = client.get_usage_summary()
-    console.print(
-        f"\n[dim]Tokens utilisés: {summary['input_tokens']:,} input / "
-        f"{summary['output_tokens']:,} output — "
-        f"Coût estimé: ${summary['estimated_cost_usd']:.4f}[/dim]"
-    )
+def _print_usage(*clients: ClaudeClient) -> None:
+    total_in = total_out = total_cost = 0.0
+    for c in clients:
+        s = c.get_usage_summary()
+        total_in   += s["input_tokens"]
+        total_out  += s["output_tokens"]
+        total_cost += s["estimated_cost_usd"]
+        cache_info = ""
+        if s["cache_read_tokens"] or s["cache_creation_tokens"]:
+            cache_info = (
+                f" | cache: {s['cache_creation_tokens']:,} write / "
+                f"{s['cache_read_tokens']:,} read"
+            )
+        console.print(
+            f"  [dim]{c.model}: {s['input_tokens']:,} in / "
+            f"{s['output_tokens']:,} out{cache_info} — ${s['estimated_cost_usd']:.4f}[/dim]"
+        )
+    if len(clients) > 1:
+        console.print(
+            f"  [dim]Total : {int(total_in):,} in / {int(total_out):,} out — "
+            f"[bold]${total_cost:.4f}[/bold][/dim]"
+        )
 
 
 # ---------------------------------------------------------------------------

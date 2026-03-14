@@ -20,6 +20,7 @@ dependencies = [
     "tiktoken>=0.7",
     "python-dotenv>=1.0",
     "json-repair>=0.30",
+    "pillow>=10.0",
 ]
 
 [project.scripts]

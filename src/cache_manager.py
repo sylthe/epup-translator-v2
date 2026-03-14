@@ -18,9 +18,9 @@ class CacheManager:
     Persists translation state between runs.
 
     Layout:
-    - cache_dir/
-        {book_id}_state.json          — lightweight state (chapters done, flags)
-        {book_id}_chapter_{n}.json    — per-chapter translated nodes
+    - cache_dir/{book_id}/
+        state.json                    — lightweight state (chapters done, flags)
+        chapter_{n}.json              — per-chapter translated nodes
     - analysis_dir/
         {book_id}_analysis.json       — full AnalysisResult (human-readable, editable)
 
@@ -34,14 +34,14 @@ class CacheManager:
         analysis_dir: str | Path | None = None,
     ) -> None:
         self.book_id = book_id
-        self.cache_dir = Path(cache_dir)
+        self.cache_dir = Path(cache_dir) / book_id
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Analysis lives in analysis_dir (or cache_dir as fallback)
-        self.analysis_dir = Path(analysis_dir) if analysis_dir else self.cache_dir
+        # Analysis lives in analysis_dir (or parent cache_dir as fallback)
+        self.analysis_dir = Path(analysis_dir) if analysis_dir else Path(cache_dir)
         self.analysis_dir.mkdir(parents=True, exist_ok=True)
 
-        self._state_path = self.cache_dir / f"{book_id}_state.json"
+        self._state_path = self.cache_dir / "state.json"
         self._analysis_path = self.analysis_dir / f"{book_id}_analysis.json"
 
         self._state = self._load_state()
@@ -95,7 +95,7 @@ class CacheManager:
     # ------------------------------------------------------------------
 
     def _chapter_path(self, chapter_num: int) -> Path:
-        return self.cache_dir / f"{self.book_id}_chapter_{chapter_num:04d}.json"
+        return self.cache_dir / f"chapter_{chapter_num:04d}.json"
 
     def save_chapter_result(self, chapter_num: int, text_nodes: list[TextNode]) -> None:
         """Persist the translated text nodes for a chapter."""
@@ -140,13 +140,18 @@ class CacheManager:
         ]
 
     def get_last_completed_chapter(self) -> int:
-        """Return the highest completed chapter number, or -1 if none."""
-        if not self._state.completed_chapters:
-            return -1
-        return self._state.completed_chapters[-1]
+        """Return the highest completed chapter whose cache file still exists, or -1."""
+        for chapter_num in reversed(self._state.completed_chapters):
+            if self._chapter_path(chapter_num).exists():
+                return chapter_num
+        return -1
 
     def is_chapter_complete(self, chapter_num: int) -> bool:
-        return chapter_num in self._state.completed_chapters
+        """True only if the chapter is marked complete AND its cache file exists."""
+        return (
+            chapter_num in self._state.completed_chapters
+            and self._chapter_path(chapter_num).exists()
+        )
 
     # ------------------------------------------------------------------
     # Misc
@@ -154,7 +159,7 @@ class CacheManager:
 
     def reset(self) -> None:
         """Delete all cache and analysis files for this book_id."""
-        for path in self.cache_dir.glob(f"{self.book_id}_*"):
+        for path in self.cache_dir.glob("*.json"):
             path.unlink(missing_ok=True)
         if self._analysis_path.exists():
             self._analysis_path.unlink(missing_ok=True)

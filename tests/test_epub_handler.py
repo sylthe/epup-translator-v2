@@ -19,7 +19,10 @@ CHAPTER1_HTML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
-<head><title>Chapter 1</title></head>
+<head>
+  <title>Chapter 1</title>
+  <link href="stylesheet.css" rel="stylesheet" type="text/css"/>
+</head>
 <body>
   <h1>Chapter One</h1>
   <p>It was a dark and stormy night.</p>
@@ -32,7 +35,10 @@ CHAPTER2_HTML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
-<head><title>Chapter 2</title></head>
+<head>
+  <title>Chapter 2</title>
+  <link href="stylesheet.css" rel="stylesheet" type="text/css"/>
+</head>
 <body>
   <h1>Chapter Two</h1>
   <p>Morning came at last.</p>
@@ -99,6 +105,7 @@ def _build_epub_bytes() -> bytes:
             "</ncx>",
         )
 
+        zf.writestr("OEBPS/stylesheet.css", "p { text-indent: 1.5em; }")
         zf.writestr("OEBPS/chapter1.xhtml", CHAPTER1_HTML)
         zf.writestr("OEBPS/chapter2.xhtml", CHAPTER2_HTML)
 
@@ -168,6 +175,13 @@ def test_reconstruct_epub_reinjects_translations(epub_path, tmp_path):
     result = reconstruct_epub(content, out)
     assert result.exists()
     assert result.stat().st_size > 0
+
+    # Verify translated text is present and CSS links are preserved
+    with zipfile.ZipFile(result) as z:
+        html = z.read("OEBPS/chapter1.xhtml").decode("utf-8")
+        assert "[FR]" in html
+        assert 'rel="stylesheet"' in html
+        assert "stylesheet.css" in html
 
 
 def test_reconstruct_epub_language_is_fr(epub_path, tmp_path):

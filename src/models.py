@@ -99,6 +99,8 @@ class EpubContent:
     images: list[Image] = field(default_factory=list)
     fonts: list[Font] = field(default_factory=list)
     toc: list[TocEntry] = field(default_factory=list)
+    source_path: Path | None = field(default=None)
+    """Path to the original ePub file (used for zipfile-based reconstruction)."""
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +110,7 @@ class EpubContent:
 
 class TranslatedNode(BaseModel):
     index: int
-    original: str
+    original: str = ""   # no longer required in API response — kept for backward compat
     translated: str
 
 
@@ -138,15 +140,15 @@ class RelationModel(BaseModel):
 
 
 class GlossaireTerme(BaseModel):
-    en: str
-    fr: str
+    en: str = ""
+    fr: str = ""
     contexte: str = ""
 
 
 class IdiomeModel(BaseModel):
     expression: str
     sens: str = ""
-    traduction: str
+    traduction: str = ""
 
 
 class ReferenceCulturelle(BaseModel):
@@ -200,18 +202,20 @@ class AnalysisResult(BaseModel):
 
 
 class ApiConfig(BaseModel):
-    model: str = "claude-sonnet-4-20250514"
-    max_tokens_response: int = 8192
+    model: str = "claude-sonnet-4-6"
+    analysis_model: str = "claude-haiku-4-5-20251001"
+    max_tokens_response: int = 16000
     temperature: float = 0.3
 
 
 class TranslationConfig(BaseModel):
-    max_tokens_per_segment: int = 16000
+    max_tokens_per_segment: int = 8000
     overlap_paragraphs: int = 3
     batch_delay_seconds: float = 1.0
 
 
 class AnalysisConfig(BaseModel):
+    sample_max_tokens: int = 25000
     sample_chapters: list[int] = Field(default_factory=lambda: [1, 2, 3])
     include_middle: bool = True
     include_last: bool = True

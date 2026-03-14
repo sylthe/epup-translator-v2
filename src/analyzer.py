@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 from typing import Any
-
-from json_repair import repair_json
 
 from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
@@ -18,8 +14,11 @@ from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
 from src.models import AnalysisResult, Config, SpineItem
 from src.prompt_builder import ANALYSIS_SECTIONS, PromptBuilder
+from src.utils import parse_llm_json
 
 logger = logging.getLogger(__name__)
+
+_WORD_TO_TOKEN_RATIO = 0.75  # conservative estimate used when truncating to token budget
 
 
 def build_analysis_sample(
@@ -30,64 +29,43 @@ def build_analysis_sample(
     """
     Build a representative text sample for analysis.
 
-    Strategy (from spec):
-    - Chapters 1–3 in full (establish tone, characters, style)
-    - One middle chapter
-    - Last chapter
-    - Total capped at ~50 000 tokens
+    Strategy: include ALL chapters in reading order up to the 50 000-token
+    budget, truncating the last included chapter if needed.  This maximises
+    character and plot coverage compared to a sparse selection.
     """
-    max_tokens = 50_000
+    max_tokens = config.analysis.sample_max_tokens
     chapters = [item for item in spine_items if item.is_chapter]
 
     if not chapters:
-        # Fallback: use all spine items
         chapters = spine_items
-
-    selected_indices: list[int] = []
-    nb = len(chapters)
-
-    # First 3 chapters (indices 0, 1, 2)
-    for i in config.analysis.sample_chapters:
-        idx = i - 1  # convert 1-based to 0-based
-        if 0 <= idx < nb:
-            selected_indices.append(idx)
-
-    # Middle chapter
-    if config.analysis.include_middle and nb > 4:
-        mid = nb // 2
-        if mid not in selected_indices:
-            selected_indices.append(mid)
-
-    # Last chapter
-    if config.analysis.include_last and nb > 1:
-        last = nb - 1
-        if last not in selected_indices:
-            selected_indices.append(last)
-
-    selected_indices = sorted(set(selected_indices))
 
     parts: list[str] = []
     total_tokens = 0
 
-    for idx in selected_indices:
-        chapter = chapters[idx]
+    for idx, chapter in enumerate(chapters):
         text = "\n".join(
             node.original_text
             for node in chapter.text_nodes
             if node.original_text.strip()
         )
-        tokens = client.count_tokens(text)
-        if total_tokens + tokens > max_tokens and parts:
-            # Truncate this chapter to fit remaining budget
-            remaining = max_tokens - total_tokens
-            words = text.split()
-            # rough estimate: 1 token ≈ 0.75 words
-            word_limit = int(remaining * 0.75)
-            text = " ".join(words[:word_limit])
+        if not text:
+            continue
+
+        tokens = client.count_tokens(text)  # computed once, reused below
+        remaining = max_tokens - total_tokens
+
+        if tokens > remaining:
+            if not parts:
+                words = text.split()
+                word_limit = int(remaining * _WORD_TO_TOKEN_RATIO)
+                text = " ".join(words[:word_limit])
+                tokens = client.count_tokens(text)
+            else:
+                break
 
         header = f"\n\n--- CHAPTER {idx + 1} ---\n\n"
         parts.append(header + text)
-        total_tokens += client.count_tokens(text)
+        total_tokens += tokens  # reuse — no second API call
 
         if total_tokens >= max_tokens:
             break
@@ -95,93 +73,56 @@ def build_analysis_sample(
     return "".join(parts)
 
 
-def _extract_json_candidate(text: str) -> str:
-    """
-    Extract the most likely JSON object from a raw LLM response.
-
-    Strategy (in order):
-    1. Content inside a ```json ... ``` or ``` ... ``` fence
-    2. Substring from the first '{' to the last '}'
-    3. The original text stripped of leading/trailing whitespace
-    """
-    stripped = text.strip()
-
-    # 1. Markdown fence
-    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped)
-    if fence:
-        return fence.group(1).strip()
-
-    # 2. First '{' … last '}'
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return stripped[start : end + 1]
-
-    return stripped
 
 
-def _parse_section_response(section_name: str, text: str) -> dict[str, Any]:
-    """
-    Parse JSON from a Claude response using a cascade of strategies:
-
-    1. Standard json.loads on the extracted candidate
-    2. json_repair (handles trailing commas, single quotes, etc.)
-    3. Return an error dict (section will be empty, not fatal)
-    """
-    candidate = _extract_json_candidate(text)
-
-    # Strategy 1: strict parse
-    try:
-        data = json.loads(candidate)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    # Strategy 2: lenient repair
-    try:
-        repaired = repair_json(candidate, return_objects=True)
-        if isinstance(repaired, dict) and repaired:
-            logger.info("JSON repaired for section %r", section_name)
-            return repaired
-    except Exception:
-        pass
-
-    logger.warning(
-        "Could not parse JSON for section %r — section will be empty.\nRaw (first 300 chars): %s",
-        section_name,
-        text[:300],
-    )
-    return {}
+def _as_list(value: Any) -> list[Any]:
+    """Ensure a value is a plain list; wrap dicts in a list, return [] for None."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        # API sometimes returns a nested dict instead of a list — flatten values
+        flat: list[Any] = []
+        for v in value.values():
+            if isinstance(v, list):
+                flat.extend(v)
+        return flat
+    return []
 
 
 def _merge_analysis(results: dict[str, dict[str, Any]], book_id: str) -> AnalysisResult:
     """Merge per-section dicts into a single AnalysisResult."""
+    # Flatten all section dicts into one for O(1) lookups
+    flat: dict[str, Any] = {}
+    for section_data in results.values():
+        flat.update(section_data)
 
     def _get(key: str, default: Any = None) -> Any:
-        for section_data in results.values():
-            if key in section_data:
-                return section_data[key]
-        return default
+        return flat.get(key, default)
 
-    return AnalysisResult(
-        book_id=book_id,
-        identification=_get("identification", {}),
-        structure_texte=_get("structure_texte", {}),
-        cadre_narratif=_get("cadre_narratif", {}),
-        ton_style=_get("ton_style", {}),
-        personnages=[],  # will be populated below
-        relations=[],
-        registre_dialogues=_get("registre_dialogues", {}),
-        glossaire=[],
-        idiomes=[],
-        contraintes_grammaticales=_get("contraintes_grammaticales", []),
-        references_culturelles=[],
-        themes=[],
-        sensibilite_contenu=_get("sensibilite_contenu", {}),
-        coherence_stylistique=_get("coherence_stylistique", {}),
-        notes_traduction=_get("notes_traduction", []),
-    )
+    try:
+        return AnalysisResult(
+            book_id=book_id,
+            identification=_get("identification", {}),
+            structure_texte=_get("structure_texte", {}),
+            cadre_narratif=_get("cadre_narratif", {}),
+            ton_style=_get("ton_style", {}),
+            personnages=_as_list(_get("personnages")),
+            relations=_as_list(_get("relations")),
+            registre_dialogues=_get("registre_dialogues", {}),
+            glossaire=_as_list(_get("glossaire")),
+            idiomes=_as_list(_get("idiomes")),
+            contraintes_grammaticales=_as_list(_get("contraintes_grammaticales")),
+            references_culturelles=_as_list(_get("references_culturelles")),
+            themes=_as_list(_get("themes")),
+            sensibilite_contenu=_get("sensibilite_contenu", {}),
+            coherence_stylistique=_get("coherence_stylistique", {}),
+            notes_traduction=_as_list(_get("notes_traduction")),
+        )
+    except Exception as exc:
+        logger.warning("AnalysisResult validation error — some fields may be empty: %s", exc)
+        return AnalysisResult(book_id=book_id)
 
 
 _SECTION_LABELS: dict[str, str] = {
@@ -247,13 +188,14 @@ async def run_analysis(
 
             system, user = prompt_builder.build_analysis_prompt(name, sample_text)
             response = await client.complete(system, user)
-            parsed = _parse_section_response(name, response)
+            parsed = parse_llm_json(response, name)
 
-            # Retry once if parsing returned empty (malformed JSON)
+            # Retry once with an explicit JSON-only hint (cheaper than resending full sample)
             if not parsed:
                 progress.update(task, description=f"[yellow]{label} — nouvelle tentative…[/yellow]")
-                response = await client.complete(system, user)
-                parsed = _parse_section_response(name, response)
+                retry_system = system + "\n\nATTENTION : ta réponse précédente n'était pas du JSON valide. Réponds UNIQUEMENT avec le JSON demandé, sans aucun texte avant ou après, sans bloc markdown."
+                response = await client.complete(retry_system, user)
+                parsed = parse_llm_json(response, name)
 
             results[name] = parsed
             progress.advance(task)
@@ -261,11 +203,7 @@ async def run_analysis(
             if config.translation.batch_delay_seconds > 0:
                 await asyncio.sleep(config.translation.batch_delay_seconds)
 
-    book_id = (
-        epub_content_or_sample.book_id
-        if hasattr(epub_content_or_sample, "book_id")
-        else "unknown"
-    )
+    book_id = getattr(epub_content_or_sample, "book_id", "unknown")
     analysis = _merge_analysis(results, book_id)
     cache.save_analysis(analysis)
     return analysis
