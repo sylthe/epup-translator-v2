@@ -14,7 +14,7 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, T
 from src.analyzer import display_analysis_summary, run_analysis
 from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
-from src.epub_handler import extract_epub, reconstruct_epub
+from src.epub_handler import apply_cover_badge, extract_epub, reconstruct_epub
 from src.models import Config
 from src.prompt_builder import PromptBuilder
 from src.translator import translate_chapter
@@ -216,7 +216,7 @@ async def run_translation(
 
         total_chaps = len(chapters_to_translate)
         for i, chapter in enumerate(chapters_to_translate):
-            label = f"[cyan]{i + 1}/{total_chaps}[/cyan] {Path(chapter.filename).name}"
+            label = f"[cyan]↻[/cyan] {Path(chapter.filename).name}"
             progress.update(task, description=label)
             await translate_chapter(
                 chapter=chapter,
@@ -238,6 +238,11 @@ async def run_translation(
         output = config.output.translated_dir / f"{stem}_fr.epub"
 
     result_path = reconstruct_epub(epub_content, output)
+
+    badge_path = Path(__file__).parent.parent / "badge-IA.png"
+    if apply_cover_badge(epub_path.parent, result_path, badge_path):
+        console.print("[green]Badge IA appliqué sur la couverture.[/green]")
+
     console.print(f"\n[bold green]Traduction terminée : {result_path}[/bold green]")
 
     _print_usage(analysis_client, client)
