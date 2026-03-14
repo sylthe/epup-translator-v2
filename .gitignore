@@ -23,6 +23,10 @@ env/
 # Output files
 output/
 
+# Source epub and generated files (not tracked)
+*.epub
+cover.jpg
+
 # IDE
 .idea/
 .vscode/
