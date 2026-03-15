@@ -56,6 +56,12 @@ python -m src.main translate roman.epub --resume
 # Use an existing (possibly hand-edited) analysis
 python -m src.main translate roman.epub --skip-analysis
 
+# Retranslate a specific chapter (accepts number, title, HTML file, or cache file)
+python -m src.main translate roman.epub -r 5
+python -m src.main translate roman.epub -r "The Awakening"
+python -m src.main translate roman.epub -r chapter05.xhtml
+python -m src.main translate roman.epub -r chapter_0004.json
+
 # Clear the cache for a book
 python -m src.main clear-cache roman.epub
 ```
@@ -98,6 +104,23 @@ To clear the cache for a specific book:
 ```bash
 python -m src.main clear-cache roman.epub
 ```
+
+## Retranslating a chapter
+
+To retranslate a single chapter without touching the rest of the cache, use `--retranslate` / `-r`. The identifier can be any of:
+
+| Format | Example |
+|--------|---------|
+| Chapter number (1-based) | `-r 5` |
+| Title substring (FR or EN, case-insensitive) | `-r "The Awakening"` |
+| HTML filename | `-r chapter05.xhtml` |
+| Cache filename | `-r chapter_0004.json` |
+
+The other cached chapters are loaded automatically so the reconstructed ePub remains complete.
+
+## Chapter correspondence table
+
+Before translation begins, a table is displayed mapping each spine item to its chapter number, title, HTML file, and cache file. The table is also saved to `output/cache/{book_id}/chapters.json` and updated with French titles as chapters are translated.
 
 ---
 

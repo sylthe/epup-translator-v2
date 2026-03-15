@@ -6,12 +6,15 @@
 - `badge-IA.png` — badge visuel apposé sur la couverture de l'epub traduit (via Pillow)
 - `apply_cover_badge` dans `epub_handler.py` — détection EPUB2/EPUB3, compositing PIL
 - `clear-cache` — nouvelle commande CLI pour supprimer le cache d'un livre
+- `--retranslate` / `-r` — retraduire un seul chapitre sans toucher au reste du cache (accepte N°, titre, fichier HTML ou fichier cache)
+- `extract_item_title()` et `classify_nonchapter_item()` dans `epub_handler.py`
+- Table de correspondance chapitres affichée avant la traduction (N°, titre FR/EN, HTML, cache) et sauvegardée dans `output/cache/{book_id}/chapters.json`
 
 ### Changed
 - Reconstruction ePub refactorisée en mode zipfile : copie byte-for-byte du source, seuls les fichiers HTML traduits sont remplacés (préserve CSS, polices, images)
 - NCX (table des matières) : les entrées `<navLabel>` sont désormais traduites avec les titres des chapitres
 - Cache restructuré par sous-répertoire : `output/cache/{book_id}/state.json` et `chapter_NNNN.json`
-- Barre de progression : affiche le fichier en cours (pas le précédent)
+- Barre de progression : affiche N° chapitre, titre, fichier HTML et fichier cache en cours
 - Prompt système : les dialogues utilisent systématiquement le tiret cadratin `—` (plus de `«»` pour les répliques)
 - `pillow>=10.0` ajouté aux dépendances
 
@@ -20,6 +23,8 @@
 - Correspondance clé `spine_map` : fallback par suffixe quand ebooklib retourne `chapter.xhtml` mais le zip stocke `OEBPS/chapter.xhtml`
 - `ElementTree.find()` : remplacement du `or` par `is not None` (éléments XML vides sont falsy)
 - `logger` non défini dans `epub_handler.py`
+- `chapter_info` → `chapter` dans le label de progression des segments (`translator.py`)
+- Détection de titre de chapitre via xpath pour les cas `<h2><em>…</em></h2>`
 
 ---
 
