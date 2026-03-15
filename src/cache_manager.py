@@ -153,6 +153,17 @@ class CacheManager:
             and self._chapter_path(chapter_num).exists()
         )
 
+    def invalidate_chapter(self, chapter_num: int) -> None:
+        """Delete the cache file for a chapter and mark it as not complete.
+
+        The chapter will be retranslated on the next run.
+        """
+        self._chapter_path(chapter_num).unlink(missing_ok=True)
+        if chapter_num in self._state.completed_chapters:
+            self._state.completed_chapters.remove(chapter_num)
+            self._save_state()
+        logger.info("Chapter %d invalidated", chapter_num)
+
     # ------------------------------------------------------------------
     # Misc
     # ------------------------------------------------------------------

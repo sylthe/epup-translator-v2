@@ -53,6 +53,7 @@ def cli(verbose: bool) -> None:
 @click.option("--resume", is_flag=True, default=False, help="Resume an interrupted translation.")
 @click.option("--skip-analysis", is_flag=True, default=False, help="Skip analysis, use cached result.")
 @click.option("--prompts-dir", type=click.Path(path_type=Path), default="prompts", show_default=True, help="Directory containing prompt templates.")
+@click.option("--retranslate", "-r", default=None, help="Retranslate a specific chapter (by number, title, HTML file, or cache file).")
 def translate(
     epub_path: Path,
     output: Path | None,
@@ -61,6 +62,7 @@ def translate(
     resume: bool,
     skip_analysis: bool,
     prompts_dir: Path,
+    retranslate: str | None,
 ) -> None:
     """Traduit un roman ePub de l'anglais au français."""
     config = load_config(config_path)
@@ -73,6 +75,7 @@ def translate(
             resume=resume,
             skip_analysis=skip_analysis,
             prompts_dir=prompts_dir,
+            retranslate=retranslate,
         )
     )
 
@@ -113,6 +116,7 @@ async def run_translation(
     resume: bool = False,
     skip_analysis: bool = False,
     prompts_dir: Path = Path("prompts"),
+    retranslate: str | None = None,
 ) -> str | None:
     """
     Full pipeline: extract → analyse → translate → reconstruct.
@@ -187,19 +191,46 @@ async def run_translation(
     console.rule("[bold]Phase 2 : Traduction[/bold]")
     chapters = [item for item in epub_content.spine_items if item.is_chapter]
 
+    # ---- Retranslate: resolve identifier and invalidate chapter ----
+    retranslate_chapter_num: int | None = None
+    if retranslate:
+        table_path_existing = cache.cache_dir / "chapters.json"
+        existing_table: list[dict] | None = None
+        if table_path_existing.exists():
+            try:
+                existing_table = json.loads(table_path_existing.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        retranslate_chapter_num = _resolve_retranslate(
+            retranslate, epub_content.spine_items, existing_table
+        )
+        if retranslate_chapter_num is None:
+            console.print(
+                f"[red]--retranslate : chapitre introuvable pour « {retranslate} ».[/red]"
+            )
+            sys.exit(1)
+        cache.invalidate_chapter(retranslate_chapter_num)
+        console.print(
+            f"  Chapitre [cyan]{retranslate_chapter_num + 1}[/cyan] invalidé — sera retraduit."
+        )
+
+    # ---- Resume (also forced when --retranslate is used, to keep other chapters) ----
+    effective_resume = resume or retranslate_chapter_num is not None
     start_chapter = 0
-    if resume:
+    if effective_resume:
         last = cache.get_last_completed_chapter()
         start_chapter = last + 1
         if start_chapter > 0:
-            console.print(f"Reprise depuis le fichier interne n°{start_chapter}.")
+            if resume:
+                console.print(f"Reprise depuis le fichier interne n°{start_chapter}.")
             # Restore already-translated chapters; skip any whose file was deleted
             missing: list[str] = []
             for chap in chapters[:start_chapter]:
                 chapter_num = chap.chapter_number or 0
                 if cache.is_chapter_complete(chapter_num):
                     chap.text_nodes = cache.load_chapter_result(chapter_num)
-                else:
+                elif chapter_num != retranslate_chapter_num:
+                    # Don't warn for intentionally invalidated chapter
                     missing.append(Path(chap.filename).name)
             if missing:
                 console.print(
@@ -276,6 +307,67 @@ async def run_translation(
 
     _print_usage(analysis_client, client)
     return str(result_path)
+
+
+def _resolve_retranslate(
+    identifier: str,
+    spine_items: list[SpineItem],
+    chapter_table: list[dict] | None = None,
+) -> int | None:
+    """Resolve a retranslate identifier to a 0-based chapter_number.
+
+    Accepts (in order):
+    - 1-based chapter number  e.g. "3"
+    - Cache filename          e.g. "chapter_0002.json"
+    - HTML filename           e.g. "chapter03.xhtml"
+    - Title substring         e.g. "The Awakening"  (case-insensitive, FR or EN)
+    """
+    ident = identifier.strip()
+    ident_lower = ident.lower()
+
+    # 1. Pure integer → 1-based display number
+    if ident.isdigit():
+        target = int(ident) - 1
+        for item in spine_items:
+            if item.is_chapter and item.chapter_number == target:
+                return target
+        return None
+
+    # 2. Cache filename
+    if ident_lower.endswith(".json"):
+        name = Path(ident_lower).name
+        for item in spine_items:
+            if item.is_chapter and item.chapter_number is not None:
+                if f"chapter_{item.chapter_number:04d}.json" == name:
+                    return item.chapter_number
+        return None
+
+    # 3. HTML filename
+    if any(ident_lower.endswith(ext) for ext in (".xhtml", ".html", ".htm")):
+        for item in spine_items:
+            if item.is_chapter and Path(item.filename).name.lower() == ident_lower:
+                return item.chapter_number
+        return None
+
+    # 4. Title substring — check chapter_table first (has FR titles)
+    if chapter_table:
+        for row in chapter_table:
+            if row["chapter_number"] is None:
+                continue
+            for field in ("title_fr", "title_en"):
+                t = row.get(field) or ""
+                if t and ident_lower in t.lower():
+                    return row["chapter_number"]
+
+    # 5. Title substring — fall back to spine items (EN only)
+    for item in spine_items:
+        if not item.is_chapter:
+            continue
+        title = extract_item_title(item)
+        if title and ident_lower in title.lower():
+            return item.chapter_number
+
+    return None
 
 
 def _build_chapter_table(spine_items: list[SpineItem], cache: CacheManager) -> list[dict]:
