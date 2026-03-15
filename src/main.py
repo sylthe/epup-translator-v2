@@ -39,12 +39,13 @@ logger = logging.getLogger(__name__)
 
 
 @click.group()
-@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
-def cli(verbose: bool) -> None:
+def cli() -> None:
     """Traducteur de romans ePub EN→FR avec analyse professionnelle."""
-    level = logging.DEBUG if verbose else logging.WARNING
+
+
+def _setup_logging(verbose: bool) -> None:
     logging.basicConfig(
-        level=level,
+        level=logging.DEBUG if verbose else logging.WARNING,
         format="%(message)s",
         datefmt="[%X]",
         handlers=[
@@ -67,6 +68,7 @@ def cli(verbose: bool) -> None:
 @click.option("--skip-analysis", is_flag=True, default=False, help="Skip analysis, use cached result.")
 @click.option("--prompts-dir", type=click.Path(path_type=Path), default="prompts", show_default=True, help="Directory containing prompt templates.")
 @click.option("--retranslate", "-r", default=None, help="Retranslate a specific chapter (by number, title, HTML file, or cache file).")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
 def translate(
     epub_path: Path,
     output: Path | None,
@@ -76,8 +78,10 @@ def translate(
     skip_analysis: bool,
     prompts_dir: Path,
     retranslate: str | None,
+    verbose: bool,
 ) -> None:
     """Traduit un roman ePub de l'anglais au français."""
+    _setup_logging(verbose)
     config = load_config(config_path)
     asyncio.run(
         run_translation(
@@ -97,8 +101,10 @@ def translate(
 @click.argument("epub_path", type=click.Path(exists=True, path_type=Path))
 @click.option("--config", "config_path", type=click.Path(path_type=Path), default="config.yaml", show_default=True, help="Config YAML file.")
 @click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt.")
-def clear_cache(epub_path: Path, config_path: Path, yes: bool) -> None:
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
+def clear_cache(epub_path: Path, config_path: Path, yes: bool, verbose: bool) -> None:
     """Supprime le cache (analyse + chapitres) pour un ePub donné."""
+    _setup_logging(verbose)
     config = load_config(config_path)
     epub_content = extract_epub(epub_path)
     cache = CacheManager(
