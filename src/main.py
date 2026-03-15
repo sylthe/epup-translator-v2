@@ -10,6 +10,7 @@ from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.logging import RichHandler
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
@@ -42,7 +43,19 @@ logger = logging.getLogger(__name__)
 def cli(verbose: bool) -> None:
     """Traducteur de romans ePub EN→FR avec analyse professionnelle."""
     level = logging.DEBUG if verbose else logging.WARNING
-    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=level,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[
+            RichHandler(
+                console=console,
+                rich_tracebacks=True,
+                show_path=verbose,
+                markup=False,
+            )
+        ],
+    )
 
 
 @cli.command()
