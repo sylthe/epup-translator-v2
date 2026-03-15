@@ -5,7 +5,7 @@ api:
   temperature: 0.3
 
 translation:
-  max_tokens_per_segment: 8000
+  max_tokens_per_segment: 12000
   overlap_paragraphs: 3
   batch_delay_seconds: 1
 
