@@ -26,6 +26,43 @@ from src.models import EpubContent, Font, Image, SpineItem, StyleSheet, TextNode
 
 logger = logging.getLogger(__name__)
 
+_HEADING_TAGS_SET = {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+_NONCHAPTER_LABELS: dict[str, str] = {
+    "cover": "Couverture",
+    "toc": "Table des matières",
+    "nav": "Navigation",
+    "copyright": "Copyright",
+    "dedication": "Dédicace",
+    "title": "Page de titre",
+    "colophon": "Colophon",
+    "about": "À propos",
+    "appendix": "Annexe",
+    "index": "Index",
+    "halftitle": "Faux-titre",
+}
+
+
+def extract_item_title(item: SpineItem, *, translated: bool = False) -> str | None:
+    """Return the text of the first heading node in a spine item.
+
+    If translated=True, returns the translated text (None if not yet translated).
+    """
+    for node in item.text_nodes:
+        if node.parent_tag in _HEADING_TAGS_SET:
+            return node.translated_text if translated else node.original_text
+    return None
+
+
+def classify_nonchapter_item(filename: str) -> str:
+    """Return a human-readable French label for a non-chapter spine item."""
+    name = filename.lower()
+    for key, label in _NONCHAPTER_LABELS.items():
+        if key in name:
+            return label
+    return Path(filename).stem
+
+
 # Tags whose direct text content should be extracted as text nodes.
 _TEXT_TAGS = {
     "p", "h1", "h2", "h3", "h4", "h5", "h6",

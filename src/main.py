@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -10,12 +11,19 @@ from pathlib import Path
 import click
 from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
+from rich.table import Table
 
 from src.analyzer import display_analysis_summary, run_analysis
 from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
-from src.epub_handler import apply_cover_badge, extract_epub, reconstruct_epub
-from src.models import Config
+from src.epub_handler import (
+    apply_cover_badge,
+    classify_nonchapter_item,
+    extract_epub,
+    extract_item_title,
+    reconstruct_epub,
+)
+from src.models import Config, SpineItem
 from src.prompt_builder import PromptBuilder
 from src.translator import translate_chapter
 from src.utils import load_config
@@ -199,6 +207,13 @@ async def run_translation(
                     f"— ils seront retraduits.[/yellow]"
                 )
 
+    # ---- Correspondence table ----
+    # Built after resume loading so cached chapters already have translated text_nodes.
+    chapter_table = _build_chapter_table(epub_content.spine_items, cache)
+    _display_chapter_table(chapter_table, console)
+    table_path = cache.cache_dir / "chapters.json"
+    _save_chapter_table(chapter_table, table_path)
+
     # Include chapters whose cache was deleted so they get retranslated
     chapters_to_translate = [
         chap for chap in chapters
@@ -214,9 +229,15 @@ async def run_translation(
     ) as progress:
         task = progress.add_task("Traduction", total=len(chapters_to_translate))
 
-        total_chaps = len(chapters_to_translate)
-        for i, chapter in enumerate(chapters_to_translate):
-            label = f"[cyan]↻[/cyan] {Path(chapter.filename).name}"
+        for chapter in chapters_to_translate:
+            chap_num = (chapter.chapter_number or 0) + 1
+            title_en = extract_item_title(chapter)
+            title_part = f" — {title_en[:38]}…" if title_en and len(title_en) > 38 else (f" — {title_en}" if title_en else "")
+            cache_filename = f"chapter_{chapter.chapter_number or 0:04d}.json"
+            label = (
+                f"[cyan]↻[/cyan] Chap.{chap_num}{title_part}"
+                f"  [dim]{Path(chapter.filename).name} │ {cache_filename}[/dim]"
+            )
             progress.update(task, description=label)
             await translate_chapter(
                 chapter=chapter,
@@ -228,6 +249,14 @@ async def run_translation(
                 progress=progress,
                 progress_task=task,
             )
+            # Update table with FR title now available
+            title_fr = extract_item_title(chapter, translated=True)
+            for row in chapter_table:
+                if row["chapter_number"] == chapter.chapter_number:
+                    row["title_fr"] = title_fr
+                    row["cached"] = True
+                    break
+            _save_chapter_table(chapter_table, table_path)
             progress.advance(task)
 
     # ---- Phase 3: Reconstruction ----
@@ -247,6 +276,63 @@ async def run_translation(
 
     _print_usage(analysis_client, client)
     return str(result_path)
+
+
+def _build_chapter_table(spine_items: list[SpineItem], cache: CacheManager) -> list[dict]:
+    """Build the chapter correspondence table from spine items and cache state."""
+    rows = []
+    for i, item in enumerate(spine_items):
+        title_en = extract_item_title(item, translated=False)
+        title_fr = extract_item_title(item, translated=True)
+
+        cache_file: str | None = None
+        is_cached = False
+        if item.is_chapter and item.chapter_number is not None:
+            cache_file = f"chapter_{item.chapter_number:04d}.json"
+            is_cached = cache.is_chapter_complete(item.chapter_number)
+
+        if item.is_chapter:
+            label = f"Chapitre {(item.chapter_number or 0) + 1}"
+        else:
+            label = classify_nonchapter_item(item.filename)
+
+        rows.append({
+            "spine_index": i,
+            "chapter_number": item.chapter_number,
+            "label": label,
+            "title_en": title_en,
+            "title_fr": title_fr,
+            "html_file": Path(item.filename).name,
+            "cache_file": cache_file,
+            "cached": is_cached,
+        })
+    return rows
+
+
+def _display_chapter_table(rows: list[dict], console: Console) -> None:
+    """Display the chapter correspondence table using Rich."""
+    table = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
+    table.add_column("N°", no_wrap=True, min_width=10)
+    table.add_column("Titre", no_wrap=False, max_width=42)
+    table.add_column("Fichier HTML", style="dim", no_wrap=True, max_width=30)
+    table.add_column("Cache", style="dim", no_wrap=True, max_width=22)
+
+    for row in rows:
+        title = row["title_fr"] or row["title_en"] or "[dim]—[/dim]"
+        if len(title) > 40:
+            title = title[:39] + "…"
+        cache_cell = row["cache_file"] or "—"
+        if row["cached"]:
+            cache_cell += " [green]✓[/green]"
+        table.add_row(row["label"], title, row["html_file"], cache_cell)
+
+    console.print(table)
+
+
+def _save_chapter_table(rows: list[dict], path: Path) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
 
 
 def _print_usage(*clients: ClaudeClient) -> None:

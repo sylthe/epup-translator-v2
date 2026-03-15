@@ -16,7 +16,7 @@ A Python CLI application that translates English `.epub` novels to French using 
 1. **Extraction** — parse the ePub, isolate text nodes while preserving the HTML tree
 2. **Analysis (Phase 1)** — 6 sequential API calls build a structured JSON profile (characters, tone, glossary, cultural references, …)
 3. **Translation (Phase 2)** — each chapter is split into segments, translated with the analysis injected as context
-4. **Reconstruction** — translated text is reinjected into the original HTML tree and a new ePub is written
+4. **Reconstruction** — translated text is reinjected into the original HTML tree and a new ePub is written; a badge "IA" is composited onto the cover if `badge-IA.png` is present
 
 ---
 
@@ -55,6 +55,9 @@ python -m src.main translate roman.epub --resume
 
 # Use an existing (possibly hand-edited) analysis
 python -m src.main translate roman.epub --skip-analysis
+
+# Clear the cache for a book
+python -m src.main clear-cache roman.epub
 ```
 
 ---
@@ -88,7 +91,13 @@ Config: `config.yaml` → `translation.max_tokens_per_segment`.
 
 ## Automatic resume
 
-If a translation is interrupted, re-run with `--resume`. The cache manager (`src/cache_manager.py`) stores state in `output/cache/{book_id}_state.json` and restarts from the last completed chapter.
+If a translation is interrupted, re-run with `--resume`. The cache manager (`src/cache_manager.py`) stores state in `output/cache/{book_id}/state.json` and chapter results in `output/cache/{book_id}/chapter_NNNN.json`. Restarts from the last completed chapter.
+
+To clear the cache for a specific book:
+
+```bash
+python -m src.main clear-cache roman.epub
+```
 
 ---
 

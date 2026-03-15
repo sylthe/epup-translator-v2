@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased / develop]
+
+### Added
+- `badge-IA.png` — badge visuel apposé sur la couverture de l'epub traduit (via Pillow)
+- `apply_cover_badge` dans `epub_handler.py` — détection EPUB2/EPUB3, compositing PIL
+- `clear-cache` — nouvelle commande CLI pour supprimer le cache d'un livre
+
+### Changed
+- Reconstruction ePub refactorisée en mode zipfile : copie byte-for-byte du source, seuls les fichiers HTML traduits sont remplacés (préserve CSS, polices, images)
+- NCX (table des matières) : les entrées `<navLabel>` sont désormais traduites avec les titres des chapitres
+- Cache restructuré par sous-répertoire : `output/cache/{book_id}/state.json` et `chapter_NNNN.json`
+- Barre de progression : affiche le fichier en cours (pas le précédent)
+- Prompt système : les dialogues utilisent systématiquement le tiret cadratin `—` (plus de `«»` pour les répliques)
+- `pillow>=10.0` ajouté aux dépendances
+
+### Fixed
+- Balises `<link>` CSS perdues dans `<head>` après passage BeautifulSoup/lxml (alinéas absents)
+- Correspondance clé `spine_map` : fallback par suffixe quand ebooklib retourne `chapter.xhtml` mais le zip stocke `OEBPS/chapter.xhtml`
+- `ElementTree.find()` : remplacement du `or` par `is not None` (éléments XML vides sont falsy)
+- `logger` non défini dans `epub_handler.py`
+
+---
+
 ## [v1.0.0] — 2026-03-11
 
 ### Added
