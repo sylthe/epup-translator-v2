@@ -46,10 +46,15 @@ _NONCHAPTER_LABELS: dict[str, str] = {
 def extract_item_title(item: SpineItem, *, translated: bool = False) -> str | None:
     """Return the text of the first heading node in a spine item.
 
+    Checks both parent_tag and xpath (handles nested cases like <h2><em>…</em></h2>
+    where parent_tag would be "em" rather than "h2").
     If translated=True, returns the translated text (None if not yet translated).
     """
     for node in item.text_nodes:
-        if node.parent_tag in _HEADING_TAGS_SET:
+        in_heading = node.parent_tag in _HEADING_TAGS_SET or any(
+            p in _HEADING_TAGS_SET for p in re.findall(r"[a-z0-9]+", node.xpath)
+        )
+        if in_heading:
             return node.translated_text if translated else node.original_text
     return None
 
