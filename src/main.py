@@ -24,6 +24,7 @@ from src.epub_handler import (
     extract_item_title,
     reconstruct_epub,
 )
+from src.epub_validator import ValidationReport, apply_fixes, validate_epub
 from src.models import Config, SpineItem
 from src.prompt_builder import PromptBuilder
 from src.translator import translate_chapter
@@ -119,6 +120,83 @@ def clear_cache(epub_path: Path, config_path: Path, yes: bool, verbose: bool) ->
         return
     cache.reset()
     console.print("[green]Cache supprimé.[/green]")
+
+
+@cli.command()
+@click.argument("epub_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--output", "-o", type=click.Path(path_type=Path), default=None,
+              help="Chemin du fichier corrigé (défaut: <nom>_fixed.epub).")
+@click.option("--no-fix", is_flag=True, default=False,
+              help="Rapport uniquement, sans générer de fichier corrigé.")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
+def validate(epub_path: Path, output: Path | None, no_fix: bool, verbose: bool) -> None:
+    """Valide la structure d'un ePub et corrige les problèmes détectables."""
+    _setup_logging(verbose)
+
+    console.rule("[bold]Validation du ePub[/bold]")
+    report = validate_epub(epub_path)
+    _display_validation_report(report)
+
+    fixable = report.fixable_issues
+    if fixable and not no_fix:
+        if output is None:
+            output = epub_path.parent / f"{epub_path.stem}_fixed.epub"
+        n = apply_fixes(report, output)
+        console.print(f"\n[green]{n} correction(s) appliquée(s) → {output}[/green]")
+    elif fixable and no_fix:
+        console.print(
+            f"\n[yellow]{len(fixable)} problème(s) corrigible(s) "
+            f"(relancez sans --no-fix pour générer le fichier corrigé).[/yellow]"
+        )
+    elif not fixable and report.is_valid:
+        console.print("\n[green]Aucun problème détecté.[/green]")
+
+    sys.exit(0 if report.is_valid else 1)
+
+
+def _display_validation_report(report: ValidationReport) -> None:
+    """Display validation results grouped by category."""
+    _ICONS = {
+        "error":   "[red]✗[/red]",
+        "warning": "[yellow]⚠[/yellow]",
+        "info":    "[green]✓[/green]",
+    }
+    _CATEGORY_LABELS = {
+        "structure": "Structure ZIP / container",
+        "metadata":  "Métadonnées OPF",
+        "manifest":  "Manifest",
+        "spine":     "Spine",
+        "toc":       "Table des matières",
+        "css":       "Feuilles de style CSS",
+        "images":    "Images",
+    }
+
+    # Group issues by category, preserving declaration order
+    categories: dict[str, list] = {}
+    for issue in report.issues:
+        categories.setdefault(issue.category, []).append(issue)
+
+    for category, issues in categories.items():
+        label = _CATEGORY_LABELS.get(category, category.upper())
+        console.rule(f"[bold]{label}[/bold]", style="dim")
+        tbl = Table(show_header=False, box=None, padding=(0, 1))
+        tbl.add_column("icon", no_wrap=True, min_width=3)
+        tbl.add_column("message")
+        tbl.add_column("fix", style="dim")
+        for issue in issues:
+            fix_str = f"→ {issue.fix_description}" if issue.fix_description else ""
+            tbl.add_row(_ICONS[issue.severity], issue.message, fix_str)
+        console.print(tbl)
+
+    n_err  = len(report.errors)
+    n_warn = len(report.warnings)
+    n_info = len(report.infos)
+    console.rule(style="dim")
+    console.print(
+        f"[red]{n_err} erreur(s)[/red]  "
+        f"[yellow]{n_warn} avertissement(s)[/yellow]  "
+        f"[green]{n_info} info(s)[/green]"
+    )
 
 
 # ---------------------------------------------------------------------------
