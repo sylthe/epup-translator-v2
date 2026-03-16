@@ -17,21 +17,32 @@ class CacheManager:
     """
     Persists translation state between runs.
 
-    State is stored in two places inside *cache_dir*:
-    - ``{book_id}_state.json``   — lightweight state file (chapters completed, flags)
-    - ``{book_id}_analysis.json`` — full AnalysisResult JSON
-    - ``{book_id}_chapter_{n}.json`` — per-chapter translation results
+    Layout:
+    - cache_dir/{book_id}/
+        state.json                    — lightweight state (chapters done, flags)
+        chapter_{n}.json              — per-chapter translated nodes
+    - analysis_dir/
+        {book_id}_analysis.json       — full AnalysisResult (human-readable, editable)
 
-    All writes are atomic (write to temp file then rename).
+    All writes are atomic (write to .tmp then rename).
     """
 
-    def __init__(self, book_id: str, cache_dir: str | Path) -> None:
+    def __init__(
+        self,
+        book_id: str,
+        cache_dir: str | Path,
+        analysis_dir: str | Path | None = None,
+    ) -> None:
         self.book_id = book_id
-        self.cache_dir = Path(cache_dir)
+        self.cache_dir = Path(cache_dir) / book_id
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self._state_path = self.cache_dir / f"{book_id}_state.json"
-        self._analysis_path = self.cache_dir / f"{book_id}_analysis.json"
+        # Analysis lives in analysis_dir (or parent cache_dir as fallback)
+        self.analysis_dir = Path(analysis_dir) if analysis_dir else Path(cache_dir)
+        self.analysis_dir.mkdir(parents=True, exist_ok=True)
+
+        self._state_path = self.cache_dir / "state.json"
+        self._analysis_path = self.analysis_dir / f"{book_id}_analysis.json"
 
         self._state = self._load_state()
 
@@ -57,11 +68,11 @@ class CacheManager:
     # ------------------------------------------------------------------
 
     def is_analysis_complete(self) -> bool:
-        """True if a completed analysis is available in the cache."""
+        """True if a completed analysis file exists."""
         return self._state.analysis_complete and self._analysis_path.exists()
 
     def save_analysis(self, analysis: AnalysisResult) -> None:
-        """Persist the full AnalysisResult and mark analysis as complete."""
+        """Persist the full AnalysisResult to analysis_dir and mark as complete."""
         _atomic_write(self._analysis_path, analysis.model_dump_json(indent=2))
         self._state.analysis_complete = True
         self._save_state()
@@ -74,19 +85,20 @@ class CacheManager:
         data = json.loads(self._analysis_path.read_text(encoding="utf-8"))
         return AnalysisResult(**data)
 
+    @property
+    def analysis_path(self) -> Path:
+        """Public path to the analysis JSON file."""
+        return self._analysis_path
+
     # ------------------------------------------------------------------
     # Chapter results
     # ------------------------------------------------------------------
 
     def _chapter_path(self, chapter_num: int) -> Path:
-        return self.cache_dir / f"{self.book_id}_chapter_{chapter_num:04d}.json"
+        return self.cache_dir / f"chapter_{chapter_num:04d}.json"
 
     def save_chapter_result(self, chapter_num: int, text_nodes: list[TextNode]) -> None:
-        """
-        Persist the translated text nodes for a chapter.
-
-        *text_nodes* should already have ``translated_text`` set.
-        """
+        """Persist the translated text nodes for a chapter."""
         entry = ChapterCacheEntry(
             chapter_number=chapter_num,
             filename="",
@@ -128,26 +140,40 @@ class CacheManager:
         ]
 
     def get_last_completed_chapter(self) -> int:
-        """
-        Return the highest completed chapter number, or -1 if none.
-
-        The caller should start from ``get_last_completed_chapter() + 1``.
-        """
-        if not self._state.completed_chapters:
-            return -1
-        return self._state.completed_chapters[-1]
+        """Return the highest completed chapter whose cache file still exists, or -1."""
+        for chapter_num in reversed(self._state.completed_chapters):
+            if self._chapter_path(chapter_num).exists():
+                return chapter_num
+        return -1
 
     def is_chapter_complete(self, chapter_num: int) -> bool:
-        return chapter_num in self._state.completed_chapters
+        """True only if the chapter is marked complete AND its cache file exists."""
+        return (
+            chapter_num in self._state.completed_chapters
+            and self._chapter_path(chapter_num).exists()
+        )
+
+    def invalidate_chapter(self, chapter_num: int) -> None:
+        """Delete the cache file for a chapter and mark it as not complete.
+
+        The chapter will be retranslated on the next run.
+        """
+        self._chapter_path(chapter_num).unlink(missing_ok=True)
+        if chapter_num in self._state.completed_chapters:
+            self._state.completed_chapters.remove(chapter_num)
+            self._save_state()
+        logger.info("Chapter %d invalidated", chapter_num)
 
     # ------------------------------------------------------------------
     # Misc
     # ------------------------------------------------------------------
 
     def reset(self) -> None:
-        """Delete all cache files for this book_id."""
-        for path in self.cache_dir.glob(f"{self.book_id}_*"):
+        """Delete all cache and analysis files for this book_id."""
+        for path in self.cache_dir.glob("*.json"):
             path.unlink(missing_ok=True)
+        if self._analysis_path.exists():
+            self._analysis_path.unlink(missing_ok=True)
         self._state = CacheState(book_id=self.book_id)
         logger.info("Cache reset for book %s", self.book_id)
 

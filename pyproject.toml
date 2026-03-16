@@ -18,6 +18,9 @@ dependencies = [
     "rich>=13.0",
     "click>=8.0",
     "tiktoken>=0.7",
+    "python-dotenv>=1.0",
+    "json-repair>=0.30",
+    "pillow>=10.0",
 ]
 
 [project.scripts]

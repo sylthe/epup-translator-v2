@@ -127,7 +127,7 @@ def mock_claude_client():
     client = MagicMock(spec=ClaudeClient)
     client.count_tokens = MagicMock(return_value=100)
 
-    def _auto_response(system: str, user: str) -> str:
+    def _auto_response(system: str, user: str, **kwargs) -> str:
         # Analysis calls: return a generic analysis JSON
         if "JSON valide" in system or "analyse" in system.lower():
             return json.dumps({"identification": {"titre_original": "Test Novel", "nb_chapitres": 3}})
@@ -153,7 +153,8 @@ def mock_claude_client():
             "calls": 10,
             "input_tokens": 50000,
             "output_tokens": 20000,
-            "total_tokens": 70000,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
             "estimated_cost_usd": 0.45,
         }
     )

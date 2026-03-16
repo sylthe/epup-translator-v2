@@ -13,6 +13,7 @@ from src.models import AnalysisResult, Config, SpineItem, TextNode
 from src.prompt_builder import ANALYSIS_SECTIONS, PromptBuilder
 from src.translator import (
     _parse_translation_response,
+    apply_french_typography,
     apply_translations,
     get_segment_context,
     split_chapter_into_segments,
@@ -48,7 +49,7 @@ def mock_client():
     client = MagicMock(spec=ClaudeClient)
     client.count_tokens = MagicMock(return_value=50)
 
-    def _make_translation(system, user):
+    def _make_translation(system, user, **kwargs):
         # Extract nodes from the user prompt and return fake translations
         import re
         nodes_match = re.search(r'\[.*\]', user, re.DOTALL)
@@ -106,6 +107,47 @@ def config():
     cfg.translation.max_tokens_per_segment = 200
     cfg.translation.overlap_paragraphs = 2
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# apply_french_typography
+# ---------------------------------------------------------------------------
+
+
+def test_typography_nbsp_before_punctuation():
+    result = apply_french_typography("Quoi ?")
+    assert "\u202f?" in result
+
+
+def test_typography_nbsp_after_guillemet_open():
+    result = apply_french_typography("Il dit « bonjour ».")
+    assert "«\u00a0" in result
+    assert "\u202f»" in result
+
+
+def test_typography_ascii_quotes_become_guillemets():
+    result = apply_french_typography('Elle répondit "jamais".')
+    assert "«" in result and "»" in result
+    assert '"' not in result
+
+
+def test_typography_dialogue_dash():
+    result = apply_french_typography("-- Tu viens ?")
+    assert result.startswith("—")
+
+
+def test_typography_dialogue_split_inserts_newline():
+    text = "Elle enfila sa veste. — Euh. Eh bien…"
+    result = apply_french_typography(text)
+    assert "\n" in result
+    lines = result.split("\n")
+    assert lines[0].endswith(".")
+    assert lines[1].startswith("—")
+
+
+def test_typography_idempotent():
+    text = "Elle cria\u202f!"
+    assert apply_french_typography(text) == text
 
 
 # ---------------------------------------------------------------------------

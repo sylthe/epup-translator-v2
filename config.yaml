@@ -1,14 +1,16 @@
 api:
-  model: "claude-sonnet-4-20250514"
-  max_tokens_response: 8192
+  model: "claude-sonnet-4-6"        # used for translation (Phase 2)
+  analysis_model: "claude-haiku-4-5-20251001"  # used for analysis (Phase 1)
+  max_tokens_response: 16000
   temperature: 0.3
 
 translation:
-  max_tokens_per_segment: 16000
+  max_tokens_per_segment: 12000
   overlap_paragraphs: 3
   batch_delay_seconds: 1
 
 analysis:
+  sample_max_tokens: 25000    # max tokens for analysis sample (was 50000)
   sample_chapters: [1, 2, 3]
   include_middle: true
   include_last: true
