@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased / develop]
+## [v1.1.0] — 2026-03-15
 
 ### Added
 - `badge-IA.png` — badge visuel apposé sur la couverture de l'epub traduit (via Pillow)
