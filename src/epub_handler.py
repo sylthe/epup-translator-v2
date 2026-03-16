@@ -26,6 +26,48 @@ from src.models import EpubContent, Font, Image, SpineItem, StyleSheet, TextNode
 
 logger = logging.getLogger(__name__)
 
+_HEADING_TAGS_SET = {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+_NONCHAPTER_LABELS: dict[str, str] = {
+    "cover": "Couverture",
+    "toc": "Table des matières",
+    "nav": "Navigation",
+    "copyright": "Copyright",
+    "dedication": "Dédicace",
+    "title": "Page de titre",
+    "colophon": "Colophon",
+    "about": "À propos",
+    "appendix": "Annexe",
+    "index": "Index",
+    "halftitle": "Faux-titre",
+}
+
+
+def extract_item_title(item: SpineItem, *, translated: bool = False) -> str | None:
+    """Return the text of the first heading node in a spine item.
+
+    Checks both parent_tag and xpath (handles nested cases like <h2><em>…</em></h2>
+    where parent_tag would be "em" rather than "h2").
+    If translated=True, returns the translated text (None if not yet translated).
+    """
+    for node in item.text_nodes:
+        in_heading = node.parent_tag in _HEADING_TAGS_SET or any(
+            p in _HEADING_TAGS_SET for p in re.findall(r"[a-z0-9]+", node.xpath)
+        )
+        if in_heading:
+            return node.translated_text if translated else node.original_text
+    return None
+
+
+def classify_nonchapter_item(filename: str) -> str:
+    """Return a human-readable French label for a non-chapter spine item."""
+    name = filename.lower()
+    for key, label in _NONCHAPTER_LABELS.items():
+        if key in name:
+            return label
+    return Path(filename).stem
+
+
 # Tags whose direct text content should be extracted as text nodes.
 _TEXT_TAGS = {
     "p", "h1", "h2", "h3", "h4", "h5", "h6",
@@ -83,6 +125,22 @@ def _build_xpath(tag: Tag) -> str:
     return "/".join(parts)
 
 
+def _has_adjacent_span_children(element: Tag) -> bool:
+    """Return True if element has two consecutive <span> children with nothing between them.
+
+    "Nothing" means no NavigableString at all — not even whitespace.  A space
+    NavigableString between spans is intentional word separation and does NOT
+    qualify.  Only the complete absence of any NavigableString between two
+    consecutive <span> Tags counts as a word-split artifact.
+    """
+    children = list(element.children)
+    for i in range(len(children) - 1):
+        if (isinstance(children[i], Tag) and children[i].name == "span"
+                and isinstance(children[i + 1], Tag) and children[i + 1].name == "span"):
+            return True
+    return False
+
+
 def _extract_text_nodes(soup: BeautifulSoup) -> list[TextNode]:
     """
     Walk the HTML tree and extract translatable text nodes.
@@ -110,7 +168,15 @@ def _extract_text_nodes(soup: BeautifulSoup) -> list[TextNode]:
 
         tag_name = element.name or ""
 
-        if tag_name in _TEXT_TAGS and direct_texts and id(element) not in visited:
+        # Detect word-split spans: two consecutive span Tag children with NO
+        # NavigableString between them (not even whitespace).  Calibre and similar
+        # tools sometimes split a single word across adjacent spans, e.g.
+        # <span>What is g</span><span>oing on with me</span>.  Sending each fragment
+        # to the AI produces nonsense translations.  Capture the parent block as a
+        # single text node instead so the AI sees the full sentence.
+        has_split_spans = tag_name in _TEXT_TAGS and _has_adjacent_span_children(element)
+
+        if tag_name in _TEXT_TAGS and (direct_texts or has_split_spans) and id(element) not in visited:
             # If this element has meaningful direct text, capture it.
             full_text = element.get_text(separator=" ", strip=True)
             if full_text:
@@ -385,6 +451,24 @@ _BLOCK_TAGS = {"p", "div", "li", "td", "th", "blockquote", "h1", "h2", "h3", "h4
 _XPATH_PART_RE = re.compile(r"^(\w+)(?:\[(\d+)\])?$")
 
 
+def _dominant_span_class(spans: list[Tag]) -> str | None:
+    """Return the most frequent span class string if all spans share it, else None."""
+    if not spans:
+        return None
+    from collections import Counter
+    counts: Counter[str] = Counter()
+    for span in spans:
+        cls = span.get("class")
+        if cls:
+            # BS4 returns a list; join to a stable string key
+            key = " ".join(cls) if isinstance(cls, list) else str(cls)
+            counts[key] += 1
+    if not counts:
+        return None
+    dominant, _ = counts.most_common(1)[0]
+    return dominant
+
+
 def _apply_translations(item: SpineItem, original_html: str | None = None) -> str:
     """
     Reinjection: replace text content of HTML nodes with their translations.
@@ -415,9 +499,30 @@ def _apply_translations(item: SpineItem, original_html: str | None = None) -> st
         if len(parts) == 1 or tag.name not in _BLOCK_TAGS:
             # Inline element or no split needed: flatten newlines to space
             text = " ".join(p.strip() for p in parts if p.strip())
-            for child in list(tag.children):
-                child.extract()
-            tag.append(NavigableString(text))
+            if tag.name in _BLOCK_TAGS:
+                # When a block element was captured whole (because it had direct-text
+                # punctuation like an opening '"'), its inner spans are replaced by plain
+                # text, stripping font-class overrides (e.g. c5 = Times New Roman 1.33em
+                # vs the paragraph's Calibri 1em).  Fix: find the dominant span class
+                # (the class shared by all/most spans) and wrap the translated text in a
+                # new span with that class so the font override is preserved.
+                styled_spans = [
+                    c for c in tag.children
+                    if isinstance(c, Tag) and c.name == "span" and c.get("class")
+                ]
+                dominant_class = _dominant_span_class(styled_spans)
+                for child in list(tag.children):
+                    child.extract()
+                if dominant_class:
+                    new_span = soup.new_tag("span", attrs={"class": dominant_class})
+                    new_span.append(NavigableString(text))
+                    tag.append(new_span)
+                else:
+                    tag.append(NavigableString(text))
+            else:
+                for child in list(tag.children):
+                    child.extract()
+                tag.append(NavigableString(text))
         else:
             # Block element: replace with one sibling <p> per line
             parent = tag.parent
@@ -429,6 +534,12 @@ def _apply_translations(item: SpineItem, original_html: str | None = None) -> st
             insert_pos = next(i for i, c in enumerate(parent.children) if c is tag)
             tag_name = tag.name
             tag_attrs = dict(tag.attrs)  # save before decompose
+            # Preserve font-class overrides from original spans (same logic as the
+            # single-part block case above): wrap each split line in a span.
+            split_dominant = _dominant_span_class([
+                c for c in tag.children
+                if isinstance(c, Tag) and c.name == "span" and c.get("class")
+            ])
             tag.decompose()
             inserted = 0
             for part in parts:
@@ -436,7 +547,12 @@ def _apply_translations(item: SpineItem, original_html: str | None = None) -> st
                 if not part:
                     continue
                 new_tag = soup.new_tag(tag_name, attrs=tag_attrs)
-                new_tag.append(NavigableString(part))
+                if split_dominant:
+                    new_span = soup.new_tag("span", attrs={"class": split_dominant})
+                    new_span.append(NavigableString(part))
+                    new_tag.append(new_span)
+                else:
+                    new_tag.append(NavigableString(part))
                 parent.insert(insert_pos + inserted, new_tag)
                 inserted += 1
 

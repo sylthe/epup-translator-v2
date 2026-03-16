@@ -16,7 +16,7 @@ A Python CLI application that translates English `.epub` novels to French using 
 1. **Extraction** — parse the ePub, isolate text nodes while preserving the HTML tree
 2. **Analysis (Phase 1)** — 6 sequential API calls build a structured JSON profile (characters, tone, glossary, cultural references, …)
 3. **Translation (Phase 2)** — each chapter is split into segments, translated with the analysis injected as context
-4. **Reconstruction** — translated text is reinjected into the original HTML tree and a new ePub is written
+4. **Reconstruction** — translated text is reinjected into the original HTML tree and a new ePub is written; a badge "IA" is composited onto the cover if `badge-IA.png` is present
 
 ---
 
@@ -55,6 +55,20 @@ python -m src.main translate roman.epub --resume
 
 # Use an existing (possibly hand-edited) analysis
 python -m src.main translate roman.epub --skip-analysis
+
+# Retranslate a specific chapter (accepts number, title, HTML file, or cache file)
+python -m src.main translate roman.epub -r 5
+python -m src.main translate roman.epub -r "The Awakening"
+python -m src.main translate roman.epub -r chapter05.xhtml
+python -m src.main translate roman.epub -r chapter_0004.json
+
+# Clear the cache for a book
+python -m src.main clear-cache roman.epub
+
+# Validate and auto-correct an ePub (saves corrected file alongside the source)
+python -m src.main validate roman.epub
+python -m src.main validate roman.epub --no-fix        # report only, no correction
+python -m src.main validate roman.epub -o corrected.epub
 ```
 
 ---
@@ -88,7 +102,47 @@ Config: `config.yaml` → `translation.max_tokens_per_segment`.
 
 ## Automatic resume
 
-If a translation is interrupted, re-run with `--resume`. The cache manager (`src/cache_manager.py`) stores state in `output/cache/{book_id}_state.json` and restarts from the last completed chapter.
+If a translation is interrupted, re-run with `--resume`. The cache manager (`src/cache_manager.py`) stores state in `output/cache/{book_id}/state.json` and chapter results in `output/cache/{book_id}/chapter_NNNN.json`. Restarts from the last completed chapter.
+
+To clear the cache for a specific book:
+
+```bash
+python -m src.main clear-cache roman.epub
+```
+
+## Retranslating a chapter
+
+To retranslate a single chapter without touching the rest of the cache, use `--retranslate` / `-r`. The identifier can be any of:
+
+| Format | Example |
+|--------|---------|
+| Chapter number (1-based) | `-r 5` |
+| Title substring (FR or EN, case-insensitive) | `-r "The Awakening"` |
+| HTML filename | `-r chapter05.xhtml` |
+| Cache filename | `-r chapter_0004.json` |
+
+The other cached chapters are loaded automatically so the reconstructed ePub remains complete.
+
+## Chapter correspondence table
+
+Before translation begins, a table is displayed mapping each spine item to its chapter number, title, HTML file, and cache file. The table is also saved to `output/cache/{book_id}/chapters.json` and updated with French titles as chapters are translated.
+
+---
+
+## ePub validation
+
+The `validate` command checks an ePub for conformance issues and can auto-correct fixable ones:
+
+- `mimetype` file not stored uncompressed
+- Missing or invalid `dc:language` / `dc:identifier` OPF metadata
+- Manifest items referenced in spine but absent from manifest
+- Broken CSS `<link>` or image `src` references
+- Incomplete or missing NCX/nav TOC
+
+```bash
+python -m src.main validate roman.epub
+# Corrected ePub saved as roman_fixed.epub by default (or use -o to specify path)
+```
 
 ---
 

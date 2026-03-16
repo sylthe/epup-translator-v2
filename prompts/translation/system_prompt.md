@@ -39,9 +39,6 @@ Tu DOIS répondre en JSON valide selon ce format exact :
       "index": 0,
       "translated": "texte français"
     }
-  ],
-  "translation_notes": [
-    "Note sur un choix de traduction particulier"
   ]
 }
 ```
