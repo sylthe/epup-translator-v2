@@ -25,6 +25,10 @@
 - `logger` non défini dans `epub_handler.py`
 - `chapter_info` → `chapter` dans le label de progression des segments (`translator.py`)
 - Détection de titre de chapitre via xpath pour les cas `<h2><em>…</em></h2>`
+- **Préservation des polices dans l'ePub traduit** — trois corrections dans `epub_handler.py` :
+  - `_has_adjacent_span_children()` : détecte les spans directement adjacents (word-split Calibre) et capture le `<p>` parent comme un seul nœud — l'IA reçoit la phrase complète au lieu de fragments (`"What is g"` / `"oing on with me"`)
+  - `_dominant_span_class()` + `_apply_translations` (cas nœud unique) : quand un `<p>` est remplacé, enveloppe le texte traduit dans un `<span class="…">` dominant — préserve les surcharges de police CSS (ex. Times New Roman 1.33em via `c5` vs Calibri 1em via `western4`)
+  - `_apply_translations` (cas block-split) : applique la même logique pour les nouveaux `<p>` créés lors de la découpe en lignes (dialogues avec incises)
 
 ---
 

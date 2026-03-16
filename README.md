@@ -64,6 +64,11 @@ python -m src.main translate roman.epub -r chapter_0004.json
 
 # Clear the cache for a book
 python -m src.main clear-cache roman.epub
+
+# Validate and auto-correct an ePub (saves corrected file alongside the source)
+python -m src.main validate roman.epub
+python -m src.main validate roman.epub --no-fix        # report only, no correction
+python -m src.main validate roman.epub -o corrected.epub
 ```
 
 ---
@@ -121,6 +126,23 @@ The other cached chapters are loaded automatically so the reconstructed ePub rem
 ## Chapter correspondence table
 
 Before translation begins, a table is displayed mapping each spine item to its chapter number, title, HTML file, and cache file. The table is also saved to `output/cache/{book_id}/chapters.json` and updated with French titles as chapters are translated.
+
+---
+
+## ePub validation
+
+The `validate` command checks an ePub for conformance issues and can auto-correct fixable ones:
+
+- `mimetype` file not stored uncompressed
+- Missing or invalid `dc:language` / `dc:identifier` OPF metadata
+- Manifest items referenced in spine but absent from manifest
+- Broken CSS `<link>` or image `src` references
+- Incomplete or missing NCX/nav TOC
+
+```bash
+python -m src.main validate roman.epub
+# Corrected ePub saved as roman_fixed.epub by default (or use -o to specify path)
+```
 
 ---
 
