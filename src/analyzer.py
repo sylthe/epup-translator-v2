@@ -25,13 +25,16 @@ def build_analysis_sample(
     spine_items: list[SpineItem],
     config: Config,
     client: ClaudeClient,
-) -> str:
+) -> tuple[str, float]:
     """
     Build a representative text sample for analysis.
 
-    Strategy: include ALL chapters in reading order up to the 50 000-token
-    budget, truncating the last included chapter if needed.  This maximises
-    character and plot coverage compared to a sparse selection.
+    Strategy: include ALL chapters in reading order up to the token budget,
+    truncating the last included chapter if needed.  This maximises character
+    and plot coverage compared to a sparse selection.
+
+    Returns (sample_text, coverage_pct) where coverage_pct is the fraction of
+    the full book token count that the sample represents (0–100).
     """
     max_tokens = config.analysis.sample_max_tokens
     chapters = [item for item in spine_items if item.is_chapter]
@@ -41,6 +44,7 @@ def build_analysis_sample(
 
     parts: list[str] = []
     total_tokens = 0
+    book_total_tokens = 0
 
     for idx, chapter in enumerate(chapters):
         text = "\n".join(
@@ -51,7 +55,8 @@ def build_analysis_sample(
         if not text:
             continue
 
-        tokens = client.count_tokens(text)  # computed once, reused below
+        tokens = client.count_tokens(text)
+        book_total_tokens += tokens
         remaining = max_tokens - total_tokens
 
         if tokens > remaining:
@@ -61,16 +66,26 @@ def build_analysis_sample(
                 text = " ".join(words[:word_limit])
                 tokens = client.count_tokens(text)
             else:
-                break
+                continue  # compte quand même dans book_total_tokens
 
         header = f"\n\n--- CHAPTER {idx + 1} ---\n\n"
         parts.append(header + text)
-        total_tokens += tokens  # reuse — no second API call
+        total_tokens += tokens
 
         if total_tokens >= max_tokens:
+            # Compte les chapitres restants pour le total
+            for remaining_chapter in chapters[idx + 1:]:
+                remaining_text = "\n".join(
+                    node.original_text
+                    for node in remaining_chapter.text_nodes
+                    if node.original_text.strip()
+                )
+                if remaining_text:
+                    book_total_tokens += client.count_tokens(remaining_text)
             break
 
-    return "".join(parts)
+    coverage_pct = (total_tokens / book_total_tokens * 100) if book_total_tokens > 0 else 100.0
+    return "".join(parts), coverage_pct
 
 
 
@@ -164,9 +179,17 @@ async def run_analysis(
         else:
             if console:
                 console.print("  Construction de l'échantillon…")
-            sample_text = build_analysis_sample(
+            sample_text, coverage_pct = build_analysis_sample(
                 epub_content_or_sample.spine_items, config, client
             )
+            if console:
+                color = "green" if coverage_pct >= 80 else "yellow" if coverage_pct >= 40 else "red"
+                console.print(
+                    f"  Couverture de l'analyse : [{color}]{coverage_pct:.0f}% du livre[/{color}]"
+                    + (" [dim](livre court ou budget suffisant)[/dim]" if coverage_pct >= 99 else
+                       " [dim](augmenter sample_max_tokens dans config.yaml pour couvrir davantage)[/dim]"
+                       if coverage_pct < 80 else "")
+                )
 
     results: dict[str, dict[str, Any]] = {}
 

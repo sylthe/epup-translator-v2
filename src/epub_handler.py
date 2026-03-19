@@ -68,6 +68,20 @@ def classify_nonchapter_item(filename: str) -> str:
     return Path(filename).stem
 
 
+# Inline formatting tags whose presence inside a captured element triggers "HTML mode":
+# the element's inner HTML is sent to the LLM instead of plain text so that emphasis,
+# links, superscripts, etc. survive the translation round-trip.
+_INLINE_FORMAT_TAGS = frozenset({"em", "strong", "i", "b", "a", "sup", "sub", "abbr", "cite", "code", "s", "u"})
+
+
+def _has_inline_formatting(element: Tag) -> bool:
+    """Return True if element has any descendant inline formatting tag."""
+    return any(
+        isinstance(c, Tag) and c.name in _INLINE_FORMAT_TAGS
+        for c in element.descendants
+    )
+
+
 # Tags whose direct text content should be extracted as text nodes.
 _TEXT_TAGS = {
     "p", "h1", "h2", "h3", "h4", "h5", "h6",
@@ -176,7 +190,20 @@ def _extract_text_nodes(soup: BeautifulSoup) -> list[TextNode]:
         # single text node instead so the AI sees the full sentence.
         has_split_spans = tag_name in _TEXT_TAGS and _has_adjacent_span_children(element)
 
-        if tag_name in _TEXT_TAGS and (direct_texts or has_split_spans) and id(element) not in visited:
+        # Detect dropcap paragraphs: <p dropcap_chars="N"> or <p> with a child
+        # <span dropcap="true">.  Always capture at the <p> level so the full
+        # sentence (dropcap letter + rest of word) is translated together by the AI,
+        # avoiding the letter-duplication artifact that appears when the dropcap span
+        # is translated in isolation.
+        is_dropcap = tag_name == "p" and (
+            element.get("dropcap_chars")
+            or any(
+                isinstance(c, Tag) and c.name == "span" and c.get("dropcap")
+                for c in element.children
+            )
+        )
+
+        if tag_name in _TEXT_TAGS and (direct_texts or has_split_spans or is_dropcap) and id(element) not in visited:
             # If this element has meaningful direct text, capture it.
             full_text = element.get_text(separator=" ", strip=True)
             if full_text:
@@ -184,12 +211,20 @@ def _extract_text_nodes(soup: BeautifulSoup) -> list[TextNode]:
                 attrs: dict[str, Any] = {}
                 for k, v in element.attrs.items():
                     attrs[k] = v if not isinstance(v, list) else " ".join(v)
+                # HTML mode: when the element contains inline formatting tags (em, strong,
+                # a, sup…) that would be silently lost by get_text(), store the raw inner
+                # HTML so the LLM can translate the text while preserving the markup.
+                # Dropcap paragraphs are excluded: their reinsertion is handled separately.
+                inner_html: str | None = None
+                if not is_dropcap and _has_inline_formatting(element):
+                    inner_html = element.decode_contents()
                 nodes.append(
                     TextNode(
                         xpath=_build_xpath(element),
                         original_text=full_text,
                         parent_tag=tag_name,
                         attributes=attrs,
+                        inner_html=inner_html,
                     )
                 )
                 # Mark ancestors so we don't double-extract
@@ -493,6 +528,16 @@ def _apply_translations(item: SpineItem, original_html: str | None = None) -> st
         if tag is None:
             continue
 
+        # HTML node: translated_text contains HTML markup — reinsert as parsed children
+        # so that inline formatting (em, strong, a, sup…) is preserved verbatim.
+        if node.inner_html is not None:
+            fragment = BeautifulSoup(node.translated_text, "html.parser")
+            for child in list(tag.children):
+                child.extract()
+            for child in list(fragment.children):
+                tag.append(child)
+            continue
+
         translated = node.translated_text
         parts = translated.split("\n")
 
@@ -500,6 +545,46 @@ def _apply_translations(item: SpineItem, original_html: str | None = None) -> st
             # Inline element or no split needed: flatten newlines to space
             text = " ".join(p.strip() for p in parts if p.strip())
             if tag.name in _BLOCK_TAGS:
+                # --- Dropcap handling ---
+                # When the block element is a dropcap paragraph, reconstruct the
+                # two-span structure: first N chars in the dropcap span, the rest
+                # in the body span.  This preserves the CSS dropcap effect regardless
+                # of whether the paragraph was captured at <p> level or had the
+                # dropcap span extracted separately in an older cache.
+                dropcap_span = next(
+                    (c for c in tag.children
+                     if isinstance(c, Tag) and c.name == "span" and c.get("dropcap")),
+                    None,
+                )
+                if dropcap_span is not None:
+                    n = int(tag.get("dropcap_chars", "1"))
+                    dropcap_char = text[:n]
+                    body_text = text[n:].lstrip()
+                    dc_cls = dropcap_span.get("class")
+                    dc_cls_str = " ".join(dc_cls) if isinstance(dc_cls, list) else (str(dc_cls) if dc_cls else "")
+                    body_spans = [
+                        c for c in tag.children
+                        if isinstance(c, Tag) and c.name == "span" and not c.get("dropcap")
+                    ]
+                    body_class = _dominant_span_class(body_spans)
+                    for child in list(tag.children):
+                        child.extract()
+                    dc_attrs: dict[str, Any] = {"dropcap": "true"}
+                    if dc_cls_str:
+                        dc_attrs["class"] = dc_cls_str
+                    new_dc = soup.new_tag("span", attrs=dc_attrs)
+                    new_dc.append(NavigableString(dropcap_char))
+                    tag.append(new_dc)
+                    tag.append(NavigableString(" "))
+                    if body_class:
+                        new_body = soup.new_tag("span", attrs={"class": body_class})
+                        new_body.append(NavigableString(body_text))
+                        tag.append(new_body)
+                    else:
+                        tag.append(NavigableString(body_text))
+                    continue
+                # --- End dropcap handling ---
+
                 # When a block element was captured whole (because it had direct-text
                 # punctuation like an opening '"'), its inner spans are replaced by plain
                 # text, stripping font-class overrides (e.g. c5 = Times New Roman 1.33em
@@ -563,10 +648,18 @@ def _apply_translations(item: SpineItem, original_html: str | None = None) -> st
     # our modifications are in <body>.
     # Use original_html (direct from zip) as it preserves <link> tags that
     # ebooklib strips when building item.html_content.
-    orig_head = re.search(r"<head[^>]*>.*?</head>", original_html or item.html_content, re.DOTALL | re.IGNORECASE)
+    source_html = original_html or item.html_content
+    orig_head = re.search(r"<head[^>]*>.*?</head>", source_html, re.DOTALL | re.IGNORECASE)
     new_head = re.search(r"<head[^>]*>.*?</head>", result, re.DOTALL | re.IGNORECASE)
     if orig_head and new_head:
         result = result[: new_head.start()] + orig_head.group() + result[new_head.end() :]
+
+    # lxml strips attributes from <body> (e.g. class="class3" which sets inherited
+    # text-indent for all paragraphs). Restore the original <body> opening tag.
+    orig_body_m = re.search(r"<body[^>]*>", source_html, re.IGNORECASE)
+    new_body_m = re.search(r"<body[^>]*>", result, re.IGNORECASE)
+    if orig_body_m and new_body_m and orig_body_m.group() != new_body_m.group():
+        result = result[: new_body_m.start()] + orig_body_m.group() + result[new_body_m.end() :]
 
     return result
 
