@@ -109,6 +109,7 @@ class CacheManager:
                     "translated_text": n.translated_text,
                     "parent_tag": n.parent_tag,
                     "attributes": n.attributes,
+                    "inner_html": n.inner_html,
                 }
                 for n in text_nodes
             ],
@@ -135,6 +136,7 @@ class CacheManager:
                 translated_text=n.get("translated_text"),
                 parent_tag=n.get("parent_tag", "p"),
                 attributes=n.get("attributes", {}),
+                inner_html=n.get("inner_html"),
             )
             for n in entry.text_nodes
         ]

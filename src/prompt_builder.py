@@ -125,7 +125,9 @@ class PromptBuilder:
         template = self._load("translation/chapter_prompt.md")
 
         nodes_payload = [
-            {"index": i, "xpath": node.xpath, "text": node.original_text}
+            {"index": i, "xpath": node.xpath, "html": node.inner_html}
+            if node.inner_html is not None
+            else {"index": i, "xpath": node.xpath, "text": node.original_text}
             for i, node in enumerate(text_nodes)
         ]
         text_nodes_json = json.dumps(nodes_payload, ensure_ascii=False, indent=2)

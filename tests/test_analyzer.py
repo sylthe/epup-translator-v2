@@ -126,13 +126,14 @@ def test_parse_section_response_invalid_json():
 
 
 def test_build_analysis_sample_contains_text(epub_content, mock_client, config):
-    sample = build_analysis_sample(epub_content.spine_items, config, mock_client)
+    sample, coverage_pct = build_analysis_sample(epub_content.spine_items, config, mock_client)
     assert "dark and stormy night" in sample
     assert isinstance(sample, str)
+    assert 0.0 <= coverage_pct <= 100.0
 
 
 def test_build_analysis_sample_includes_chapter_markers(epub_content, mock_client, config):
-    sample = build_analysis_sample(epub_content.spine_items, config, mock_client)
+    sample, _ = build_analysis_sample(epub_content.spine_items, config, mock_client)
     assert "CHAPTER" in sample
 
 
