@@ -1,5 +1,20 @@
 # Changelog
 
+## [v1.2.0] — 2026-03-18
+
+### Added
+- **Préservation du formatage inline** (`epub_handler.py`, `translator.py`, `prompt_builder.py`) — les balises `em`, `strong`, `a`, `sup`, `sub`, `abbr`, `cite`, `code`, `s`, `u` survivent à la traduction. Quand un nœud contient du formatage inline, son inner HTML est envoyé au LLM (champ `"html"` dans le prompt) ; le LLM retourne du HTML traduit ; la réinsertion remplace les enfants du tag par le fragment parsé. `apply_french_typography()` est skippé pour ces nœuds pour ne pas corrompre les attributs HTML.
+- **Glossaire évolutif** (`translator.py`) — `enrich_analysis_from_chapter()` : après chaque chapitre traduit, un appel Haiku détecte les nouveaux personnages (genre déduit depuis les pronoms) et les nouveaux termes récurrents (max 3) ; `analysis.personnages` et `analysis.glossaire` sont enrichis en place et sauvegardés via `cache.save_analysis()`. Non-fatal : retourne des listes vides en cas d'erreur.
+- **Couverture de l'analyse** (`analyzer.py`) — `build_analysis_sample()` retourne désormais `(sample_text, coverage_pct)`. La couverture est affichée en couleur (vert ≥ 80 %, jaune ≥ 40 %, rouge < 40 %) lors de la phase d'analyse.
+- `CLAUDE.md` — instructions pour Claude Code (architecture, commandes, conventions)
+
+### Fixed
+- **Lettrines (drop caps)** (`epub_handler.py`) — extraction : forçage de la capture au niveau `<p>` pour tous les paragraphes à lettrine, évitant la duplication du caractère initial ou la perte de structure. Réinsertion : reconstruction de la structure deux-spans (dropcap + corps) avec préservation des classes CSS.
+- **Alinéas / text-indent** (`epub_handler.py`) — ebooklib/lxml strippait les attributs du `<body>` (ex. `class="class3"` qui porte `text-indent: 0.9em` hérité par tous les `<p>`). `_apply_translations()` restaure désormais le tag `<body>` original en plus du `<head>`.
+- **Chargement du cache inconditionnel** (`main.py`) — les `text_nodes` traduits sont maintenant toujours rechargés depuis le cache, que `--resume` soit passé ou non. Auparavant, une 2e exécution sans `--resume` sur un livre entièrement caché produisait un epub en anglais (les chapitres étaient ignorés car déjà en cache mais leurs traductions n'étaient pas rechargées en mémoire).
+
+---
+
 ## [v1.1.0] — 2026-03-15
 
 ### Added
