@@ -12,7 +12,7 @@ from rich.progress import Progress, TaskID
 
 from src.cache_manager import CacheManager
 from src.claude_client import ClaudeClient
-from src.models import AnalysisResult, Config, SpineItem, TextNode, TranslationResult
+from src.models import AnalysisResult, Config, GlossaireTerme, PersonnageModel, SpineItem, TextNode, TranslationResult
 from src.prompt_builder import PromptBuilder
 from src.utils import extract_json_candidate
 
@@ -73,7 +73,7 @@ def split_chapter_into_segments(
     current_tokens = 0
 
     for node in text_nodes:
-        node_tokens = client.count_tokens(node.original_text)
+        node_tokens = client.count_tokens(node.inner_html if node.inner_html is not None else node.original_text)
         # If a single node exceeds the limit, it must go in its own segment
         if node_tokens > max_tokens:
             if current:
@@ -117,7 +117,13 @@ def get_segment_context(
     if not context_nodes:
         return ""
 
-    lines = [f"[{n.parent_tag}] {n.translated_text}" for n in context_nodes]
+    lines = [
+        "[{}] {}".format(
+            n.parent_tag,
+            re.sub(r"<[^>]+>", "", n.translated_text) if n.inner_html is not None else n.translated_text,
+        )
+        for n in context_nodes
+    ]
     return "Fin du segment précédent (pour la continuité) :\n" + "\n".join(lines)
 
 
@@ -193,9 +199,85 @@ def apply_translations(
     for translated in result.translated_nodes:
         idx = translated.index
         if idx in node_map:
-            node_map[idx].translated_text = apply_french_typography(translated.translated)
+            node = node_map[idx]
+            # Skip French typography post-processing for HTML nodes: Claude must handle
+            # it directly, and regex transforms would corrupt HTML attributes/tags.
+            text = translated.translated
+            if node.inner_html is None:
+                text = apply_french_typography(text)
+            node.translated_text = text
         else:
             logger.warning("Translation index %d out of range (segment has %d nodes)", idx, len(text_nodes))
+
+
+async def enrich_analysis_from_chapter(
+    chapter: SpineItem,
+    analysis: AnalysisResult,
+    client: ClaudeClient,
+) -> tuple[list[PersonnageModel], list[GlossaireTerme]]:
+    """Un appel Haiku pour détecter nouveaux personnages et termes dans un chapitre traduit.
+
+    Retourne (new_personnages, new_glossaire). Non-fatal : retourne des listes vides en cas d'erreur.
+    """
+    # Échantillon de texte EN et FR (limité à ~3000 chars chacun)
+    en_parts: list[str] = []
+    fr_parts: list[str] = []
+    en_chars = fr_chars = 0
+    MAX_CHARS = 3000
+    for node in chapter.text_nodes:
+        if en_chars < MAX_CHARS:
+            chunk = node.original_text[: MAX_CHARS - en_chars]
+            en_parts.append(chunk)
+            en_chars += len(chunk)
+        if fr_chars < MAX_CHARS and node.translated_text:
+            chunk = node.translated_text[: MAX_CHARS - fr_chars]
+            fr_parts.append(chunk)
+            fr_chars += len(chunk)
+
+    en_sample = " ".join(en_parts)[:MAX_CHARS]
+    fr_sample = " ".join(fr_parts)[:MAX_CHARS]
+
+    existing_chars = {p.nom: p.genre for p in analysis.personnages}
+    existing_terms = {g.en: g.fr for g in analysis.glossaire}
+
+    system = (
+        "Tu es un assistant d'analyse littéraire. "
+        "Tu réponds UNIQUEMENT en JSON valide, sans aucun autre texte."
+    )
+    user = (
+        f"Extraits du chapitre (EN → FR) :\n\n"
+        f"[EN]\n{en_sample}\n\n"
+        f"[FR]\n{fr_sample}\n\n"
+        f"Personnages déjà connus (NE PAS répéter) : {json.dumps(existing_chars, ensure_ascii=False)}\n"
+        f"Termes déjà connus (NE PAS répéter) : {json.dumps(existing_terms, ensure_ascii=False)}\n\n"
+        "Identifie UNIQUEMENT ce qui est NOUVEAU dans ce chapitre :\n"
+        "- NOUVEAUX personnages nommés (déduis le genre : he/him→M, she/her→F, they/them→NB, ambigu→?)\n"
+        "- NOUVEAUX termes récurrents uniquement (max 3 : surnoms, lieux spécifiques, expressions)\n"
+        "  N'inclus PAS : verbes, adjectifs courants, noms déjà connus, mots isolés sans contexte.\n\n"
+        "Réponds UNIQUEMENT avec ce JSON (listes vides si rien à ajouter) :\n"
+        '{"personnages": [{"nom": "...", "genre": "M|F|NB|?", "role_narratif": "..."}], '
+        '"glossaire": [{"en": "...", "fr": "...", "contexte": "..."}]}'
+    )
+
+    try:
+        response = await client.complete(system, user, cache_system=False)
+        data = json.loads(extract_json_candidate(response))
+
+        new_personnages = [
+            PersonnageModel(**p)
+            for p in data.get("personnages", [])
+            if isinstance(p, dict) and p.get("nom") and p["nom"] not in existing_chars
+        ]
+        new_glossaire = [
+            GlossaireTerme(**g)
+            for g in data.get("glossaire", [])
+            if isinstance(g, dict) and g.get("en") and g["en"] not in existing_terms
+        ]
+        return new_personnages, new_glossaire
+
+    except Exception as exc:
+        logger.debug("Enrichissement analyse ch%d (non-fatal) : %s", chapter.chapter_number or 0, exc)
+        return [], []
 
 
 async def translate_chapter(
@@ -207,6 +289,7 @@ async def translate_chapter(
     config: Config,
     progress: Progress | None = None,
     progress_task: TaskID | None = None,
+    enrich_client: ClaudeClient | None = None,
 ) -> SpineItem:
     """
     Translate all text nodes of a chapter, segment by segment.
@@ -285,4 +368,23 @@ async def translate_chapter(
                     node.translated_text = node.original_text
 
     cache.save_chapter_result(chapter_num, chapter.text_nodes)
+
+    # --- Enrichissement de l'analyse avec les découvertes de ce chapitre ---
+    if enrich_client is not None:
+        new_persos, new_termes = await enrich_analysis_from_chapter(chapter, analysis, enrich_client)
+        if new_persos:
+            analysis.personnages.extend(new_persos)
+            logger.info(
+                "Analyse enrichie : +%d personnage(s) découvert(s) au chapitre %d : %s",
+                len(new_persos), chapter_num, [p.nom for p in new_persos],
+            )
+        if new_termes:
+            analysis.glossaire.extend(new_termes)
+            logger.info(
+                "Analyse enrichie : +%d terme(s) découvert(s) au chapitre %d : %s",
+                len(new_termes), chapter_num, [g.en for g in new_termes],
+            )
+        if new_persos or new_termes:
+            cache.save_analysis(analysis)
+
     return chapter

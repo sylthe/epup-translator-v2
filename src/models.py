@@ -22,13 +22,17 @@ class TextNode:
     xpath: str
     """XPath-like address of this node in the HTML tree (e.g. 'body/div[2]/p[1]')."""
     original_text: str
-    """Original English text."""
+    """Original English text (plain, used for display and token counting fallback)."""
     translated_text: str | None = None
-    """Will be filled by the translation phase."""
+    """Will be filled by the translation phase. May contain HTML if inner_html is set."""
     parent_tag: str = "p"
     """Tag of the immediate parent element (e.g. 'p', 'h1', 'span')."""
     attributes: dict[str, Any] = field(default_factory=dict)
     """CSS classes and other attributes of the parent element."""
+    inner_html: str | None = None
+    """Inner HTML of the element, set when it contains inline formatting tags (em, strong,
+    a, sup…). When non-None, the LLM receives HTML and must return translated HTML; the
+    reinsertion replaces the element's children with the parsed translated HTML."""
 
 
 @dataclass

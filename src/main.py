@@ -311,29 +311,28 @@ async def run_translation(
             f"  Chapitre [cyan]{retranslate_chapter_num + 1}[/cyan] invalidé — sera retraduit."
         )
 
-    # ---- Resume (also forced when --retranslate is used, to keep other chapters) ----
+    # ---- Cache loading ----
+    # Always restore already-translated chapters from cache so that reconstruct_epub
+    # has the translated text_nodes even when --resume is not passed (e.g. when
+    # re-running to regenerate the epub after a code fix).
     effective_resume = resume or retranslate_chapter_num is not None
-    start_chapter = 0
     if effective_resume:
         last = cache.get_last_completed_chapter()
-        start_chapter = last + 1
-        if start_chapter > 0:
-            if resume:
-                console.print(f"Reprise depuis le fichier interne n°{start_chapter}.")
-            # Restore already-translated chapters; skip any whose file was deleted
-            missing: list[str] = []
-            for chap in chapters[:start_chapter]:
-                chapter_num = chap.chapter_number or 0
-                if cache.is_chapter_complete(chapter_num):
-                    chap.text_nodes = cache.load_chapter_result(chapter_num)
-                elif chapter_num != retranslate_chapter_num:
-                    # Don't warn for intentionally invalidated chapter
-                    missing.append(Path(chap.filename).name)
-            if missing:
-                console.print(
-                    f"  [yellow]Cache manquant pour : {', '.join(missing)} "
-                    f"— ils seront retraduits.[/yellow]"
-                )
+        if resume and last >= 0:
+            console.print(f"Reprise depuis le fichier interne n°{last + 1}.")
+
+    missing: list[str] = []
+    for chap in chapters:
+        chapter_num = chap.chapter_number or 0
+        if cache.is_chapter_complete(chapter_num) and chapter_num != retranslate_chapter_num:
+            chap.text_nodes = cache.load_chapter_result(chapter_num)
+        elif not cache.is_chapter_complete(chapter_num) and chapter_num != retranslate_chapter_num:
+            missing.append(Path(chap.filename).name)
+    if missing and effective_resume:
+        console.print(
+            f"  [yellow]Cache manquant pour : {', '.join(missing)} "
+            f"— ils seront retraduits.[/yellow]"
+        )
 
     # ---- Correspondence table ----
     # Built after resume loading so cached chapters already have translated text_nodes.
@@ -376,6 +375,7 @@ async def run_translation(
                 config=config,
                 progress=progress,
                 progress_task=task,
+                enrich_client=analysis_client,
             )
             # Update table with FR title now available
             title_fr = extract_item_title(chapter, translated=True)

@@ -26,6 +26,8 @@ Voici l'analyse complète du roman que tu traduis. Tu DOIS respecter rigoureusem
    - Pas de double espace — une seule espace entre les mots
    - Majuscule après un point, minuscule après une virgule
 10. **Format** : Tu reçois le texte structuré par nœuds. Traduis CHAQUE nœud individuellement. Ne fusionne pas et ne divise pas les nœuds.
+    - Nœud avec `"text"` : traduis le texte brut et retourne du texte brut dans `"translated"`.
+    - Nœud avec `"html"` : traduis le contenu textuel en **préservant EXACTEMENT** la structure HTML (balises, attributs, nesting). Retourne du HTML valide dans `"translated"`. Ne modifie jamais les noms de balises, les attributs ni les classes CSS. Applique les règles typographiques françaises au texte à l'intérieur des balises.
 11. **Contenu sensible** : Ne censure rien. Traduis fidèlement le contenu tel qu'il est, y compris les scènes explicites et le langage cru.
 
 ## Format de réponse
